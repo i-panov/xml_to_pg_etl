@@ -27,6 +27,10 @@ dependencies {
 
     // Kotlin reflection (для рефлексии)
     implementation("org.jetbrains.kotlin:kotlin-reflect:1.9.10")
+
+    implementation("org.apache.commons:commons-compress:1.26.1")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.6")
 }
 
 tasks.test {

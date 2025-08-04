@@ -3,17 +3,19 @@ package ru.my
 import java.io.*
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.nio.file.Path
 import java.util.logging.Logger
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.XMLStreamConstants.*
 import javax.xml.stream.XMLStreamReader
+import kotlin.io.path.*
 
 private val logger = Logger.getLogger("XmlParser")
 
 /**
  * Парсит XML элементы с автоматическим определением кодировки
  */
-fun parseXmlElements(file: File, tag: String): Sequence<Map<String, String>> = sequence {
+fun parseXmlElements(file: Path, tag: String): Sequence<Map<String, String>> = sequence {
     if (!file.exists()) {
         logger.warning("File ${file.name} not found")
         return@sequence
@@ -29,7 +31,7 @@ fun parseXmlElements(file: File, tag: String): Sequence<Map<String, String>> = s
 /**
  * Парсит XML элементы с принудительным указанием кодировки
  */
-fun parseXmlElements(file: File, tag: String, encoding: Charset): Sequence<Map<String, String>> = sequence {
+fun parseXmlElements(file: Path, tag: String, encoding: Charset): Sequence<Map<String, String>> = sequence {
     if (!file.exists()) {
         logger.warning("File ${file.name} not found")
         return@sequence
@@ -39,7 +41,7 @@ fun parseXmlElements(file: File, tag: String, encoding: Charset): Sequence<Map<S
 }
 
 private fun parseXmlElementsWithEncoding(
-    file: File,
+    file: Path,
     tag: String,
     encoding: Charset
 ): Sequence<Map<String, String>> = sequence {
@@ -55,7 +57,7 @@ private fun parseXmlElementsWithEncoding(
     var xmlReader: XMLStreamReader? = null
 
     try {
-        FileInputStream(file).use { inputStream ->
+        file.inputStream().use { inputStream ->
             // Буферизация для улучшения производительности
             val bufferedStream = BufferedInputStream(inputStream)
             val reader = InputStreamReader(bufferedStream, encoding)
@@ -111,9 +113,9 @@ private fun parseXmlElementsWithEncoding(
 /**
  * Определяет кодировку XML файла из XML declaration или BOM
  */
-fun detectXmlEncoding(file: File): Charset {
+fun detectXmlEncoding(file: Path): Charset {
     try {
-        FileInputStream(file).use { inputStream ->
+        file.inputStream().use { inputStream ->
             // Читаем только первые 4 байта для BOM
             val bomBuffer = ByteArray(4)
             val bytesRead = inputStream.read(bomBuffer)

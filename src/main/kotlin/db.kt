@@ -34,6 +34,10 @@ fun Connection.upsert(
 ) {
     if (items.isEmpty()) return
 
+    if (items.size > 1_000_000) {
+        throw IllegalArgumentException("Items batch is too large: ${items.size}")
+    }
+
     val columns = getTableMetaData(table, schema).also {
         if (it.isEmpty()) throw IllegalArgumentException("Table $table not found or has no columns")
     }
@@ -53,18 +57,18 @@ fun Connection.upsert(
 
     val allColumns = columns.map { it.name }
 
-    fun quoteIndent(name: String) = "\"${name.replace("\"", "\"\"")}\""
-    val quotedTable = if (schema != null) "${quoteIndent(schema)}.${quoteIndent(table)}" else quoteIndent(table)
-    val quotedColumns = allColumns.map { quoteIndent(it) }
+    fun quoteIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
+    val quotedTable = if (schema != null) "${quoteIdent(schema)}.${quoteIdent(table)}" else quoteIdent(table)
+    val quotedColumns = allColumns.map { quoteIdent(it) }
 
     val placeholdersForRow = "(" + allColumns.joinToString(", ") { "?" } + ")"
     val valuesPlaceholders = List(items.size) { placeholdersForRow }.joinToString(", ")
 
     val updateSet = allColumns
         .filterNot { col -> uniqueColumns.any { it.lowercase() == col.lowercase() } }
-        .joinToString(", ") { "${quoteIndent(it)} = EXCLUDED.${quoteIndent(it)}" }
+        .joinToString(", ") { "${quoteIdent(it)} = EXCLUDED.${quoteIdent(it)}" }
 
-    val conflictTarget = uniqueColumns.joinToString(", ") { quoteIndent(it) }
+    val conflictTarget = uniqueColumns.joinToString(", ") { quoteIdent(it) }
 
     val sql = buildString {
         append("INSERT INTO $quotedTable (")

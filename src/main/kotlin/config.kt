@@ -1,7 +1,8 @@
 package ru.my
 
-import java.io.File
 import java.util.logging.Logger
+import java.nio.file.Path
+import kotlin.io.path.*
 
 data class DbConfig(
     val host: String,
@@ -21,13 +22,12 @@ data class AppConfig(
 
 private val logger = Logger.getLogger("AppConfigLoader")
 
-fun parseEnvFile(path: String): Map<String, String> {
-    val file = File(path)
-    if (!file.exists()) {
+fun parseEnvFile(path: Path): Map<String, String> {
+    if (!path.exists()) {
         throw IllegalArgumentException("Environment file not found: $path")
     }
 
-    return file.readLines()
+    return path.readLines()
         .mapIndexedNotNull { index, line ->
             val trimmed = line.trim()
             when {
@@ -46,7 +46,7 @@ fun parseEnvFile(path: String): Map<String, String> {
         }.toMap()
 }
 
-fun loadAppConfig(envPath: String): AppConfig {
+fun loadAppConfig(envPath: Path): AppConfig {
     logger.info("Loading configuration from: $envPath")
     val env = parseEnvFile(envPath)
 

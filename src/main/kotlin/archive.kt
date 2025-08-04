@@ -1,14 +1,15 @@
 package ru.my
 
+import kotlin.io.path.*
+import java.nio.file.*
+import java.util.logging.Logger
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.compressors.CompressorStreamFactory
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
-import java.util.logging.Logger
+import java.nio.file.Files.createDirectories
 
 private val logger = Logger.getLogger("ArchiveExtractor")
 
@@ -21,56 +22,56 @@ private const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
  * Универсальная функция для извлечения архивов различных форматов с streaming обработкой
  * Поддерживает: ZIP, TAR, TAR.GZ, TAR.BZ2, 7Z, GZIP, BZIP2 и др.
  *
- * @param archivePath путь к архиву
- * @param extractTo папка для извлечения
+ * @param archiveFile путь к архиву
+ * @param extractDir папка для извлечения
  * @param xmlFileExtensions расширения XML файлов для извлечения
  * @param removeArchiveAfterExtraction удалять ли архив после успешного извлечения
  * @param maxFileSizeBytes максимальный размер извлекаемого файла в байтах
  * @return список путей к извлеченным XML файлам
  */
 fun extractArchive(
-    archivePath: String,
-    extractTo: String,
+    archiveFile: Path,
+    extractDir: Path,
     xmlFileExtensions: Set<String> = setOf("xml"),
     removeArchiveAfterExtraction: Boolean = false,
     maxFileSizeBytes: Long = MAX_FILE_SIZE
 ): List<String> {
-    val archiveFile = File(archivePath)
     if (!archiveFile.exists()) {
-        throw IllegalArgumentException("Archive file not found: $archivePath")
+        throw IllegalArgumentException("Archive file not found: $archiveFile")
     }
 
-    val extractDir = File(extractTo)
-    extractDir.mkdirs()
+    if (!archiveFile.isRegularFile()) {
+        throw IllegalArgumentException("Archive path is not a regular file: $archiveFile")
+    }
 
-    logger.info("Extracting archive: ${archiveFile.name} to $extractTo")
+    extractDir.createDirectories()
+    logger.info("Extracting archive: ${archiveFile.fileName} to $extractDir")
 
     val extractedFiles = when {
-        archivePath.endsWith(".zip", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".zip", ignoreCase = true) ->
             extractWithFormat(archiveFile, extractDir, ArchiveStreamFactory.ZIP, xmlFileExtensions, maxFileSizeBytes)
-        archivePath.endsWith(".tar.gz", ignoreCase = true) ||
-                archivePath.endsWith(".tgz", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".tar.gz", ignoreCase = true) || archiveFile.toString().endsWith(".tgz", ignoreCase = true) ->
             extractTarGz(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        archivePath.endsWith(".tar.bz2", ignoreCase = true) ||
-                archivePath.endsWith(".tbz2", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".tar.bz2", ignoreCase = true) || archiveFile.toString().endsWith(".tbz2", ignoreCase = true) ->
             extractTarBz2(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        archivePath.endsWith(".tar", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".tar", ignoreCase = true) ->
             extractWithFormat(archiveFile, extractDir, ArchiveStreamFactory.TAR, xmlFileExtensions, maxFileSizeBytes)
-        archivePath.endsWith(".gz", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".gz", ignoreCase = true) ->
             extractGzip(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        archivePath.endsWith(".bz2", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".bz2", ignoreCase = true) ->
             extractBzip2(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        archivePath.endsWith(".7z", ignoreCase = true) ->
+        archiveFile.toString().endsWith(".7z", ignoreCase = true) ->
             extractWithFormat(archiveFile, extractDir, ArchiveStreamFactory.SEVEN_Z, xmlFileExtensions, maxFileSizeBytes)
-        else -> extractGeneric(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
+        else ->
+            extractGeneric(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
     }
 
     // Удаляем архив после успешного извлечения
     if (removeArchiveAfterExtraction && extractedFiles.isNotEmpty()) {
-        if (archiveFile.delete()) {
-            logger.info("Deleted archive: $archivePath")
+        if (archiveFile.deleteIfExists()) {
+            logger.info("Deleted archive: $archiveFile")
         } else {
-            logger.warning("Failed to delete archive: $archivePath")
+            logger.warning("Failed to delete archive: $archiveFile")
         }
     }
 
@@ -78,17 +79,17 @@ fun extractArchive(
 }
 
 private fun extractWithFormat(
-    archiveFile: File,
-    extractDir: File,
+    archiveFile: Path,
+    extractDir: Path,
     format: String,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
 ): List<String> {
     val extractedFiles = mutableListOf<String>()
 
-    FileInputStream(archiveFile).use { fis ->
+    archiveFile.inputStream().use { inputStream ->
         val factory = ArchiveStreamFactory()
-        val archiveStream: ArchiveInputStream<out ArchiveEntry> = factory.createArchiveInputStream(format, fis)
+        val archiveStream: ArchiveInputStream<out ArchiveEntry> = factory.createArchiveInputStream(format, inputStream)
 
         var entry: ArchiveEntry? = archiveStream.nextEntry
         while (entry != null) {
@@ -97,18 +98,18 @@ private fun extractWithFormat(
                 if (entry.size > maxFileSizeBytes) {
                     logger.warning("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
                 } else {
-                    val outputFile = File(extractDir, sanitizeFileName(entry.name))
-                    outputFile.parentFile?.mkdirs()
+                    val outputFile = extractDir.resolve(sanitizeFileName(entry.name))
+                    createDirectories(outputFile.parent)
 
                     try {
                         // Streaming копирование с буфером
                         streamingCopy(archiveStream, outputFile, entry.size)
-                        extractedFiles.add(outputFile.absolutePath)
+                        extractedFiles.add(outputFile.toString())
                         logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                     } catch (e: Exception) {
                         logger.severe("Failed to extract ${entry.name}: ${e.message}")
                         // Удаляем частично созданный файл
-                        outputFile.delete()
+                        outputFile.deleteIfExists()
                         throw e
                     }
                 }
@@ -122,14 +123,14 @@ private fun extractWithFormat(
 }
 
 private fun extractTarGz(
-    archiveFile: File,
-    extractDir: File,
+    archiveFile: Path,
+    extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
 ): List<String> {
     val extractedFiles = mutableListOf<String>()
 
-    FileInputStream(archiveFile).use { fis ->
+    Files.newInputStream(archiveFile).use { fis ->
         val compressorFactory = CompressorStreamFactory()
         val gzipStream = compressorFactory.createCompressorInputStream(CompressorStreamFactory.GZIP, fis)
 
@@ -142,16 +143,16 @@ private fun extractTarGz(
                 if (entry.size > maxFileSizeBytes) {
                     logger.warning("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
                 } else {
-                    val outputFile = File(extractDir, sanitizeFileName(entry.name))
-                    outputFile.parentFile?.mkdirs()
+                    val outputFile = extractDir.resolve(sanitizeFileName(entry.name))
+                    createDirectories(outputFile.parent)
 
                     try {
                         streamingCopy(tarStream, outputFile, entry.size)
-                        extractedFiles.add(outputFile.absolutePath)
+                        extractedFiles.add(outputFile.toString())
                         logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                     } catch (e: Exception) {
                         logger.severe("Failed to extract ${entry.name}: ${e.message}")
-                        outputFile.delete()
+                        outputFile.deleteIfExists()
                         throw e
                     }
                 }
@@ -166,14 +167,14 @@ private fun extractTarGz(
 }
 
 private fun extractTarBz2(
-    archiveFile: File,
-    extractDir: File,
+    archiveFile: Path,
+    extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
 ): List<String> {
     val extractedFiles = mutableListOf<String>()
 
-    FileInputStream(archiveFile).use { fis ->
+    Files.newInputStream(archiveFile).use { fis ->
         val compressorFactory = CompressorStreamFactory()
         val bzip2Stream = compressorFactory.createCompressorInputStream(CompressorStreamFactory.BZIP2, fis)
 
@@ -186,16 +187,16 @@ private fun extractTarBz2(
                 if (entry.size > maxFileSizeBytes) {
                     logger.warning("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
                 } else {
-                    val outputFile = File(extractDir, sanitizeFileName(entry.name))
-                    outputFile.parentFile?.mkdirs()
+                    val outputFile = extractDir.resolve(sanitizeFileName(entry.name))
+                    createDirectories(outputFile.parent)
 
                     try {
                         streamingCopy(tarStream, outputFile, entry.size)
-                        extractedFiles.add(outputFile.absolutePath)
+                        extractedFiles.add(outputFile.toString())
                         logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                     } catch (e: Exception) {
                         logger.severe("Failed to extract ${entry.name}: ${e.message}")
-                        outputFile.delete()
+                        outputFile.deleteIfExists()
                         throw e
                     }
                 }
@@ -210,29 +211,30 @@ private fun extractTarBz2(
 }
 
 private fun extractGzip(
-    archiveFile: File,
-    extractDir: File,
+    archiveFile: Path,
+    extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
 ): List<String> {
     val extractedFiles = mutableListOf<String>()
 
-    FileInputStream(archiveFile).use { fis ->
+    Files.newInputStream(archiveFile).use { fis ->
         val compressorFactory = CompressorStreamFactory()
         val gzipStream = compressorFactory.createCompressorInputStream(CompressorStreamFactory.GZIP, fis)
+        val outputFileName = archiveFile.fileName.toString().removeSuffix(".gz")
 
-        val outputFileName = archiveFile.nameWithoutExtension
         if (isXmlFile(outputFileName, xmlExtensions)) {
-            val outputFile = File(extractDir, sanitizeFileName(outputFileName))
+            val outputFile = extractDir.resolve(sanitizeFileName(outputFileName))
+            createDirectories(outputFile.parent)
 
             try {
                 // Для GZIP файлов размер неизвестен заранее, поэтому используем ограниченный поток
                 streamingCopyWithLimit(gzipStream, outputFile, maxFileSizeBytes)
-                extractedFiles.add(outputFile.absolutePath)
+                extractedFiles.add(outputFile.toString())
                 logger.info("Extracted: $outputFileName")
             } catch (e: Exception) {
                 logger.severe("Failed to extract $outputFileName: ${e.message}")
-                outputFile.delete()
+                outputFile.deleteIfExists()
                 throw e
             }
         }
@@ -243,28 +245,29 @@ private fun extractGzip(
 }
 
 private fun extractBzip2(
-    archiveFile: File,
-    extractDir: File,
+    archiveFile: Path,
+    extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
 ): List<String> {
     val extractedFiles = mutableListOf<String>()
 
-    FileInputStream(archiveFile).use { fis ->
+    archiveFile.inputStream().use { fis ->
         val compressorFactory = CompressorStreamFactory()
         val bzip2Stream = compressorFactory.createCompressorInputStream(CompressorStreamFactory.BZIP2, fis)
+        val outputFileName = archiveFile.fileName.toString().removeSuffix(".bz2")
 
-        val outputFileName = archiveFile.nameWithoutExtension
         if (isXmlFile(outputFileName, xmlExtensions)) {
-            val outputFile = File(extractDir, sanitizeFileName(outputFileName))
+            val outputFile = extractDir.resolve(sanitizeFileName(outputFileName))
+            createDirectories(outputFile.parent)
 
             try {
                 streamingCopyWithLimit(bzip2Stream, outputFile, maxFileSizeBytes)
-                extractedFiles.add(outputFile.absolutePath)
+                extractedFiles.add(outputFile.toString())
                 logger.info("Extracted: $outputFileName")
             } catch (e: Exception) {
                 logger.severe("Failed to extract $outputFileName: ${e.message}")
-                outputFile.delete()
+                outputFile.deleteIfExists()
                 throw e
             }
         }
@@ -275,35 +278,31 @@ private fun extractBzip2(
 }
 
 private fun extractGeneric(
-    archiveFile: File,
-    extractDir: File,
+    archiveFile: Path,
+    extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
 ): List<String> {
-    logger.info("Attempting generic extraction for: ${archiveFile.name}")
-
+    val extractedFiles = mutableListOf<String>()
     try {
-        FileInputStream(archiveFile).use { fis ->
+        archiveFile.inputStream().use { fis ->
             val factory = ArchiveStreamFactory()
-            val archiveStream: ArchiveInputStream<out ArchiveEntry> = factory.createArchiveInputStream(fis)
-
-            val extractedFiles = mutableListOf<String>()
+            val archiveStream = factory.createArchiveInputStream(fis) as ArchiveInputStream<ArchiveEntry>
             var entry: ArchiveEntry? = archiveStream.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory && isXmlFile(entry.name, xmlExtensions)) {
                     if (entry.size > maxFileSizeBytes) {
                         logger.warning("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
                     } else {
-                        val outputFile = File(extractDir, sanitizeFileName(entry.name))
-                        outputFile.parentFile?.mkdirs()
-
+                        val outputFile = extractDir.resolve(sanitizeFileName(entry.name))
+                        createDirectories(outputFile.parent)
                         try {
                             streamingCopy(archiveStream, outputFile, entry.size)
-                            extractedFiles.add(outputFile.absolutePath)
+                            extractedFiles.add(outputFile.toString())
                             logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                         } catch (e: Exception) {
                             logger.severe("Failed to extract ${entry.name}: ${e.message}")
-                            outputFile.delete()
+                            outputFile.deleteIfExists()
                             throw e
                         }
                     }
@@ -311,69 +310,77 @@ private fun extractGeneric(
                 entry = archiveStream.nextEntry
             }
             archiveStream.close()
-
-            return extractedFiles
         }
+        return extractedFiles
     } catch (e: Exception) {
-        logger.severe("Failed to extract archive ${archiveFile.name}: ${e.message}")
-        throw IllegalArgumentException("Unsupported archive format: ${archiveFile.name}", e)
+        logger.severe("Failed to extract archive ${archiveFile.fileName}: ${e.message}")
+        throw IllegalArgumentException("Unsupported archive format: ${archiveFile.fileName}", e)
     }
 }
 
-/**
- * Копирование с буфером для известного размера файла
- */
-private fun streamingCopy(inputStream: InputStream, outputFile: File, expectedSize: Long) {
-    FileOutputStream(outputFile).use { fos ->
+// Вспомогательные функции для работы с файлами
+private fun streamingCopy(source: InputStream, destination: Path, size: Long) {
+    destination.outputStream().use { outputStream ->
         val buffer = ByteArray(BUFFER_SIZE)
-        var totalBytes = 0L
+        var totalRead = 0L
         var bytesRead: Int
 
-        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-            fos.write(buffer, 0, bytesRead)
-            totalBytes += bytesRead
+        while (totalRead < size) {
+            bytesRead = source.read(buffer)
+            if (bytesRead == -1) break
+            outputStream.write(buffer, 0, bytesRead)
+            totalRead += bytesRead
 
-            // Проверяем, что не превышаем ожидаемый размер (защита от zip bombs)
-            if (totalBytes > expectedSize * 2) {
-                throw IllegalStateException("File size exceeds expected size by 2x: expected $expectedSize, got $totalBytes")
+            // Восстанавливаем защиту от zip bombs (была в старом коде)
+            if (totalRead > size * 2) {
+                throw IllegalStateException("File size exceeds expected size by 2x: expected $size, got $totalRead")
             }
         }
 
-        logger.fine("Copied $totalBytes bytes to ${outputFile.name}")
-    }
-}
-
-/**
- * Копирование с ограничением размера для неизвестного размера файла
- */
-private fun streamingCopyWithLimit(inputStream: InputStream, outputFile: File, maxSize: Long) {
-    FileOutputStream(outputFile).use { fos ->
-        val buffer = ByteArray(BUFFER_SIZE)
-        var totalBytes = 0L
-        var bytesRead: Int
-
-        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-            if (totalBytes + bytesRead > maxSize) {
-                throw IllegalStateException("File size exceeds maximum allowed size: $maxSize")
-            }
-
-            fos.write(buffer, 0, bytesRead)
-            totalBytes += bytesRead
+        // Проверяем, что файл полностью распакован
+        if (totalRead in 1..<size) {
+            throw IOException("Incomplete file extraction: expected $size bytes, got $totalRead")
         }
 
-        logger.fine("Copied $totalBytes bytes to ${outputFile.name}")
+        // Возвращаем логирование, которое было в старом коде
+        logger.fine("Copied $totalRead bytes to ${destination.fileName}")
     }
 }
 
-private fun isXmlFile(fileName: String, xmlExtensions: Set<String>): Boolean {
-    val extension = fileName.substringAfterLast('.', "").lowercase()
-    return extension in xmlExtensions.map { it.lowercase() }
+private fun streamingCopyWithLimit(source: InputStream, destination: Path, maxBytes: Long) {
+    destination.outputStream().use { outputStream ->
+        val buffer = ByteArray(BUFFER_SIZE)
+        var totalRead = 0L
+        var bytesRead = 0 // Инициализируем переменную
+
+        while (totalRead < maxBytes) {
+            bytesRead = source.read(buffer)
+            if (bytesRead == -1) break
+
+            // Проверяем, не превысит ли запись лимит
+            if (totalRead + bytesRead > maxBytes) {
+                throw IOException("File size exceeds limit of $maxBytes bytes")
+            }
+
+            outputStream.write(buffer, 0, bytesRead)
+            totalRead += bytesRead
+        }
+
+        // Если файл не закончился, но мы достигли лимита, это ошибка
+        if (bytesRead != -1) {
+            throw IOException("File size exceeds limit of $maxBytes bytes")
+        }
+
+        // Возвращаем логирование
+        logger.fine("Copied $totalRead bytes to ${destination.fileName}")
+    }
+}
+
+private fun isXmlFile(fileName: String, extensions: Set<String>): Boolean {
+    val ext = fileName.substringAfterLast('.', "").lowercase()
+    return extensions.any { it.equals(ext, ignoreCase = true) }
 }
 
 private fun sanitizeFileName(fileName: String): String {
-    return fileName
-        .replace("\\", "/")
-        .split("/")
-        .last()
-        .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+    return fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 }

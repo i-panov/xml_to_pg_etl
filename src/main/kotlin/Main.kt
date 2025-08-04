@@ -3,6 +3,10 @@ package ru.my
 import kotlinx.cli.ArgParser
 import kotlinx.cli.ArgType
 import kotlinx.cli.required
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
 import java.util.logging.Logger
 import kotlin.io.path.*
 
@@ -75,5 +79,17 @@ fun main(args: Array<String>) {
                 .filter { it.isRegularFile() }
         }
         else -> emptyList()
+    }
+
+    xmlFiles.asFlow().flowOn(Dispatchers.IO).onEach { xml ->
+        val mapping = mappings.firstOrNull { m ->
+            Regex(m.xmlFile).matches(xml.fileName.toString())
+        }
+
+        if (mapping != null) {
+            parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize).onEach {
+                // upsert it
+            }
+        }
     }
 }

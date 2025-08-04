@@ -33,6 +33,20 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.6")
 }
 
+tasks.jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes["Main-Class"] = "ru.my.MainKt"
+    }
+
+    from({
+        configurations.runtimeClasspath.get()
+            .filter { it.name.endsWith("jar") }
+            .map { zipTree(it) }
+    })
+}
+
 tasks.test {
     useJUnitPlatform()
 }

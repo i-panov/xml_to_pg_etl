@@ -2,6 +2,8 @@ package ru.my
 
 import java.sql.Connection
 import java.sql.DatabaseMetaData
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 
 data class ColumnInfo(
     val name: String,
@@ -51,18 +53,18 @@ fun Connection.upsert(
 
     val allColumns = columns.map { it.name }
 
-    fun quoteIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
-    val quotedTable = if (schema != null) "${quoteIdent(schema)}.${quoteIdent(table)}" else quoteIdent(table)
-    val quotedColumns = allColumns.map { quoteIdent(it) }
+    fun quoteIndent(name: String) = "\"${name.replace("\"", "\"\"")}\""
+    val quotedTable = if (schema != null) "${quoteIndent(schema)}.${quoteIndent(table)}" else quoteIndent(table)
+    val quotedColumns = allColumns.map { quoteIndent(it) }
 
     val placeholdersForRow = "(" + allColumns.joinToString(", ") { "?" } + ")"
     val valuesPlaceholders = List(items.size) { placeholdersForRow }.joinToString(", ")
 
     val updateSet = allColumns
         .filterNot { col -> uniqueColumns.any { it.lowercase() == col.lowercase() } }
-        .joinToString(", ") { "${quoteIdent(it)} = EXCLUDED.${quoteIdent(it)}" }
+        .joinToString(", ") { "${quoteIndent(it)} = EXCLUDED.${quoteIndent(it)}" }
 
-    val conflictTarget = uniqueColumns.joinToString(", ") { quoteIdent(it) }
+    val conflictTarget = uniqueColumns.joinToString(", ") { quoteIndent(it) }
 
     val sql = buildString {
         append("INSERT INTO $quotedTable (")
@@ -106,4 +108,26 @@ fun Connection.upsert(
             autoCommit = prevAutoCommit
         }
     }
+}
+
+fun createDataSource(dbConfig: DbConfig): HikariDataSource {
+    val config = HikariConfig().apply {
+        jdbcUrl = "jdbc:postgresql://${dbConfig.host}:${dbConfig.port}/${dbConfig.database}"
+        username = dbConfig.user
+        password = dbConfig.password
+        dbConfig.schema?.let {
+            addDataSourceProperty("currentSchema", it)
+        }
+
+        // Оптимальные настройки для высокой нагрузки
+        maximumPoolSize = Runtime.getRuntime().availableProcessors() * 4
+        minimumIdle = maximumPoolSize / 2
+        connectionTimeout = 30_000
+        idleTimeout = 600_000
+        maxLifetime = 1_800_000
+        validationTimeout = 3_000
+        leakDetectionThreshold = 60_000
+        isAutoCommit = false
+    }
+    return HikariDataSource(config)
 }

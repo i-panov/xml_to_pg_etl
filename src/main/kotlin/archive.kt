@@ -1,5 +1,7 @@
 package ru.my
 
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
@@ -18,6 +20,18 @@ private const val BUFFER_SIZE = 8192
 // Максимальный размер файла для извлечения (например, 1GB)
 private const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
 
+fun extractArchiveFlow(
+    archiveFile: Path,
+    extractDir: Path,
+    xmlFileExtensions: Set<String> = setOf("xml"),
+    maxFileSizeBytes: Long = MAX_FILE_SIZE
+): Flow<Path> = extractArchive(
+    archiveFile = archiveFile,
+    extractDir = extractDir,
+    xmlFileExtensions = xmlFileExtensions,
+    maxFileSizeBytes = maxFileSizeBytes
+).asFlow().flowOn(Dispatchers.IO)
+
 /**
  * Универсальная функция для извлечения архивов различных форматов с streaming обработкой
  * Поддерживает: ZIP, TAR, TAR.GZ, TAR.BZ2, 7Z, GZIP, BZIP2 и др.
@@ -25,7 +39,6 @@ private const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
  * @param archiveFile путь к архиву
  * @param extractDir папка для извлечения
  * @param xmlFileExtensions расширения XML файлов для извлечения
- * @param removeArchiveAfterExtraction удалять ли архив после успешного извлечения
  * @param maxFileSizeBytes максимальный размер извлекаемого файла в байтах
  * @return список путей к извлеченным XML файлам
  */
@@ -33,7 +46,6 @@ fun extractArchive(
     archiveFile: Path,
     extractDir: Path,
     xmlFileExtensions: Set<String> = setOf("xml"),
-    removeArchiveAfterExtraction: Boolean = false,
     maxFileSizeBytes: Long = MAX_FILE_SIZE
 ): Sequence<Path> = sequence {
     if (!archiveFile.exists()) {
@@ -101,21 +113,7 @@ fun extractArchive(
         )
     }
 
-    var hasExtractedFiles = false
-
-    for (file in extractedFiles) {
-        yield(file)
-        hasExtractedFiles = true
-    }
-
-    // Удаляем архив после успешного извлечения
-    if (removeArchiveAfterExtraction && hasExtractedFiles) {
-        if (archiveFile.deleteIfExists()) {
-            logger.info("Deleted archive: $archiveFile")
-        } else {
-            logger.warning("Failed to delete archive: $archiveFile")
-        }
-    }
+    yieldAll(extractedFiles)
 }
 
 fun ArchiveInputStream<out ArchiveEntry>.iterateEntries(): Sequence<ArchiveEntry> = sequence {

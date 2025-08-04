@@ -13,7 +13,7 @@ dependencies {
     testImplementation(kotlin("test"))
 
     // Корутины (обязательно)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
 
     // HikariCP для connection pooling
     implementation("com.zaxxer:HikariCP:5.0.1")

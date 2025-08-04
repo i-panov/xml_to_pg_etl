@@ -35,7 +35,7 @@ fun extractArchive(
     xmlFileExtensions: Set<String> = setOf("xml"),
     removeArchiveAfterExtraction: Boolean = false,
     maxFileSizeBytes: Long = MAX_FILE_SIZE
-): List<String> {
+): List<Path> {
     if (!archiveFile.exists()) {
         throw IllegalArgumentException("Archive file not found: $archiveFile")
     }
@@ -84,8 +84,8 @@ private fun extractWithFormat(
     format: String,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<String> {
-    val extractedFiles = mutableListOf<String>()
+): List<Path> {
+    val extractedFiles = mutableListOf<Path>()
 
     archiveFile.inputStream().use { inputStream ->
         val factory = ArchiveStreamFactory()
@@ -104,7 +104,7 @@ private fun extractWithFormat(
                     try {
                         // Streaming копирование с буфером
                         streamingCopy(archiveStream, outputFile, entry.size)
-                        extractedFiles.add(outputFile.toString())
+                        extractedFiles.add(outputFile)
                         logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                     } catch (e: Exception) {
                         logger.severe("Failed to extract ${entry.name}: ${e.message}")
@@ -127,8 +127,8 @@ private fun extractTarGz(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<String> {
-    val extractedFiles = mutableListOf<String>()
+): List<Path> {
+    val extractedFiles = mutableListOf<Path>()
 
     Files.newInputStream(archiveFile).use { fis ->
         val compressorFactory = CompressorStreamFactory()
@@ -148,7 +148,7 @@ private fun extractTarGz(
 
                     try {
                         streamingCopy(tarStream, outputFile, entry.size)
-                        extractedFiles.add(outputFile.toString())
+                        extractedFiles.add(outputFile)
                         logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                     } catch (e: Exception) {
                         logger.severe("Failed to extract ${entry.name}: ${e.message}")
@@ -171,8 +171,8 @@ private fun extractTarBz2(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<String> {
-    val extractedFiles = mutableListOf<String>()
+): List<Path> {
+    val extractedFiles = mutableListOf<Path>()
 
     Files.newInputStream(archiveFile).use { fis ->
         val compressorFactory = CompressorStreamFactory()
@@ -192,7 +192,7 @@ private fun extractTarBz2(
 
                     try {
                         streamingCopy(tarStream, outputFile, entry.size)
-                        extractedFiles.add(outputFile.toString())
+                        extractedFiles.add(outputFile)
                         logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                     } catch (e: Exception) {
                         logger.severe("Failed to extract ${entry.name}: ${e.message}")
@@ -215,8 +215,8 @@ private fun extractGzip(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<String> {
-    val extractedFiles = mutableListOf<String>()
+): List<Path> {
+    val extractedFiles = mutableListOf<Path>()
 
     Files.newInputStream(archiveFile).use { fis ->
         val compressorFactory = CompressorStreamFactory()
@@ -230,7 +230,7 @@ private fun extractGzip(
             try {
                 // Для GZIP файлов размер неизвестен заранее, поэтому используем ограниченный поток
                 streamingCopyWithLimit(gzipStream, outputFile, maxFileSizeBytes)
-                extractedFiles.add(outputFile.toString())
+                extractedFiles.add(outputFile)
                 logger.info("Extracted: $outputFileName")
             } catch (e: Exception) {
                 logger.severe("Failed to extract $outputFileName: ${e.message}")
@@ -249,8 +249,8 @@ private fun extractBzip2(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<String> {
-    val extractedFiles = mutableListOf<String>()
+): List<Path> {
+    val extractedFiles = mutableListOf<Path>()
 
     archiveFile.inputStream().use { fis ->
         val compressorFactory = CompressorStreamFactory()
@@ -263,7 +263,7 @@ private fun extractBzip2(
 
             try {
                 streamingCopyWithLimit(bzip2Stream, outputFile, maxFileSizeBytes)
-                extractedFiles.add(outputFile.toString())
+                extractedFiles.add(outputFile)
                 logger.info("Extracted: $outputFileName")
             } catch (e: Exception) {
                 logger.severe("Failed to extract $outputFileName: ${e.message}")
@@ -282,8 +282,8 @@ private fun extractGeneric(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<String> {
-    val extractedFiles = mutableListOf<String>()
+): List<Path> {
+    val extractedFiles = mutableListOf<Path>()
     try {
         archiveFile.inputStream().use { fis ->
             val factory = ArchiveStreamFactory()
@@ -298,7 +298,7 @@ private fun extractGeneric(
                         createDirectories(outputFile.parent)
                         try {
                             streamingCopy(archiveStream, outputFile, entry.size)
-                            extractedFiles.add(outputFile.toString())
+                            extractedFiles.add(outputFile)
                             logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
                         } catch (e: Exception) {
                             logger.severe("Failed to extract ${entry.name}: ${e.message}")
@@ -383,4 +383,17 @@ private fun isXmlFile(fileName: String, extensions: Set<String>): Boolean {
 
 private fun sanitizeFileName(fileName: String): String {
     return fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+}
+
+fun isArchive(path: String): Boolean {
+    val lowerPath = path.lowercase()
+    return lowerPath.endsWith(".zip") ||
+            lowerPath.endsWith(".tar") ||
+            lowerPath.endsWith(".tar.gz") ||
+            lowerPath.endsWith(".tgz") ||
+            lowerPath.endsWith(".tar.bz2") ||
+            lowerPath.endsWith(".tbz2") ||
+            lowerPath.endsWith(".gz") ||
+            lowerPath.endsWith(".bz2") ||
+            lowerPath.endsWith(".7z")
 }

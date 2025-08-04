@@ -1,7 +1,6 @@
 package ru.my
 
 import kotlinx.cli.*
-import java.io.File
 import java.util.logging.Logger
 import kotlin.io.path.*
 
@@ -36,10 +35,43 @@ fun main(args: Array<String>) {
     logger.info("ENV file: $envPath")
     logger.info("XML file: $xmlPath")
 
-    val config = loadAppConfig(Path(envPath))
-    val xmlFile = File(xmlPath)
+    val config = loadAppConfig(Path(envPath)).apply { validate() }
+    val mappings = config.loadMappings()
+
+    val hasMappingErrors = mappings.any { mapping ->
+        val errors = mapping.validate()
+        errors.forEach { (key, value) ->
+            logger.severe("$key: $value")
+        }
+        errors.isNotEmpty()
+    }
+
+    if (hasMappingErrors) {
+        error("Has mapping errors")
+    }
+
+    val xmlFile = Path(xmlPath)
 
     if (!xmlFile.exists()) {
-        error("XML file not found: $xmlPath")
+        error("XML file, directory, or archive not found: $xmlPath")
+    }
+
+    val xmlFiles = when {
+        xmlFile.isRegularFile() -> {
+            when {
+                isArchive(xmlFile.toString()) -> {
+                    extractArchive(xmlFile, extractTo)
+                }
+                xmlFile.toString().endsWith(".xml", ignoreCase = true) -> {
+                    listOf(xmlFile)
+                }
+                else -> emptyList()
+            }
+        }
+        xmlFile.isDirectory() -> {
+            xmlFile.listDirectoryEntries("*.xml")
+                .filter { it.isRegularFile() }
+        }
+        else -> emptyList()
     }
 }

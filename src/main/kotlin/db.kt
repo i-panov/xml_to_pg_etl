@@ -116,7 +116,7 @@ fun Connection.upsert(
 
 fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     val config = HikariConfig().apply {
-        jdbcUrl = "jdbc:postgresql://${dbConfig.host}:${dbConfig.port}/${dbConfig.database}"
+        jdbcUrl = dbConfig.jdbcUrl
         username = dbConfig.user
         password = dbConfig.password
         dbConfig.schema?.let {

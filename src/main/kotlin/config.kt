@@ -1,5 +1,7 @@
 package ru.my
 
+import com.zaxxer.hikari.HikariDataSource
+import java.io.File
 import java.util.logging.Logger
 import java.nio.file.Path
 import kotlin.io.path.*
@@ -11,14 +13,40 @@ data class DbConfig(
     val password: String,
     val database: String,
     val schema: String? = null,
-)
+) {
+    val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}"
+
+    fun createDataSource(): HikariDataSource = createDataSource(this)
+
+    fun validate() {
+        require(host.isNotBlank()) { "DB host cannot be blank" }
+        require(port in 1..65535) { "DB port must be between 1 and 65535" }
+        require(user.isNotBlank()) { "DB user cannot be blank" }
+        require(database.isNotBlank()) { "DB database cannot be blank" }
+    }
+}
 
 data class AppConfig(
     val db: DbConfig,
     val mappingsFile: String,
     val removeArchivesAfterUnpack: Boolean = false,
     val removeXmlAfterImport: Boolean = false,
-)
+) {
+    fun loadMappings(): List<MappingTable> {
+        val file = File(mappingsFile)
+
+        if (!file.exists()) {
+            throw IllegalArgumentException("Mappings file not exists: $mappingsFile")
+        }
+
+        return parseMappings(file)
+    }
+
+    fun validate() {
+        db.validate()
+        require(mappingsFile.isNotBlank()) { "Mappings file path cannot be blank" }
+    }
+}
 
 private val logger = Logger.getLogger("AppConfigLoader")
 

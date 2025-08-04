@@ -1,6 +1,8 @@
 package ru.my
 
-import kotlinx.cli.*
+import kotlinx.cli.ArgParser
+import kotlinx.cli.ArgType
+import kotlinx.cli.required
 import java.util.logging.Logger
 import kotlin.io.path.*
 
@@ -60,7 +62,7 @@ fun main(args: Array<String>) {
         xmlFile.isRegularFile() -> {
             when {
                 isArchive(xmlFile.toString()) -> {
-                    extractArchive(xmlFile, extractTo)
+                    extractArchive(xmlFile, extractTo).toList()
                 }
                 xmlFile.toString().endsWith(".xml", ignoreCase = true) -> {
                     listOf(xmlFile)

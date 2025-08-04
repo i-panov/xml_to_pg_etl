@@ -35,7 +35,7 @@ fun extractArchive(
     xmlFileExtensions: Set<String> = setOf("xml"),
     removeArchiveAfterExtraction: Boolean = false,
     maxFileSizeBytes: Long = MAX_FILE_SIZE
-): List<Path> {
+): Sequence<Path> = sequence {
     if (!archiveFile.exists()) {
         throw IllegalArgumentException("Archive file not found: $archiveFile")
     }
@@ -49,7 +49,7 @@ fun extractArchive(
     val fileName = archiveFile.toString()
     fun fileNameEndsWith(sub: String): Boolean = fileName.endsWith(sub, ignoreCase = true)
 
-    fun extractWithFormatLocal(format: String) = extractInternal(
+    fun extractInternalLocal(format: String) = extractInternal(
         archiveFile = archiveFile,
         extractDir = extractDir,
         format = format,
@@ -58,9 +58,9 @@ fun extractArchive(
     )
 
     val extractedFiles = when {
-        fileNameEndsWith(".zip") -> extractWithFormatLocal(ArchiveStreamFactory.ZIP)
-        fileNameEndsWith(".tar") -> extractWithFormatLocal(ArchiveStreamFactory.TAR)
-        fileNameEndsWith(".7z") -> extractWithFormatLocal(ArchiveStreamFactory.SEVEN_Z)
+        fileNameEndsWith(".zip") -> extractInternalLocal(ArchiveStreamFactory.ZIP)
+        fileNameEndsWith(".tar") -> extractInternalLocal(ArchiveStreamFactory.TAR)
+        fileNameEndsWith(".7z") -> extractInternalLocal(ArchiveStreamFactory.SEVEN_Z)
         fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") -> extractInternal(
             archiveFile = archiveFile,
             extractDir = extractDir,
@@ -101,16 +101,21 @@ fun extractArchive(
         )
     }
 
+    var hasExtractedFiles = false
+
+    for (file in extractedFiles) {
+        yield(file)
+        hasExtractedFiles = true
+    }
+
     // Удаляем архив после успешного извлечения
-    if (removeArchiveAfterExtraction && extractedFiles.isNotEmpty()) {
+    if (removeArchiveAfterExtraction && hasExtractedFiles) {
         if (archiveFile.deleteIfExists()) {
             logger.info("Deleted archive: $archiveFile")
         } else {
             logger.warning("Failed to delete archive: $archiveFile")
         }
     }
-
-    return extractedFiles
 }
 
 fun ArchiveInputStream<out ArchiveEntry>.iterateEntries(): Sequence<ArchiveEntry> = sequence {
@@ -130,9 +135,7 @@ private fun extractEntries(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<Path> {
-    val extractedFiles = mutableListOf<Path>()
-
+): Sequence<Path> = sequence {
     for (entry in archiveStream.iterateEntries()) {
         if (entry.isDirectory || !isXmlFile(entry.name, xmlExtensions)) {
             continue
@@ -148,7 +151,7 @@ private fun extractEntries(
 
         try {
             streamingCopy(archiveStream, outputFile, entry.size)
-            extractedFiles.add(outputFile)
+            yield(outputFile)
             logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
         } catch (e: Exception) {
             logger.severe("Failed to extract ${entry.name}: ${e.message}")
@@ -156,8 +159,6 @@ private fun extractEntries(
             throw e
         }
     }
-
-    return extractedFiles
 }
 
 private fun InputStream.toArchiveInputStream(format: String? = null): ArchiveInputStream<ArchiveEntry> {
@@ -182,7 +183,7 @@ private fun extractInternal(
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long,
     compressorFormat: String? = null,
-): List<Path> = archiveFile.inputStream().use { inputStream ->
+): Sequence<Path> = archiveFile.inputStream().use { inputStream ->
     if (compressorFormat != null) {
         return@use inputStream.toCompressorInputStream(compressorFormat).use { compressedStream ->
             compressedStream.toArchiveInputStream(format).use { archiveStream ->
@@ -203,8 +204,8 @@ private fun extractCompressedFile(
     maxFileSizeBytes: Long,
     suffixToRemove: String,
     compressorFormat: String
-): List<Path> {
-    return archiveFile.inputStream().use { fis ->
+): Sequence<Path> = sequence {
+    archiveFile.inputStream().use { fis ->
         fis.toCompressorInputStream(compressorFormat).use { compressedStream ->
             val outputFileName = archiveFile.fileName.toString().removeSuffix(suffixToRemove)
 
@@ -215,15 +216,13 @@ private fun extractCompressedFile(
                 try {
                     streamingCopyWithLimit(compressedStream, outputFile, maxFileSizeBytes)
                     logger.info("Extracted: $outputFileName")
-                    listOf(outputFile)
+                    yield(outputFile)
                 } catch (e: Exception) {
                     logger.severe("Failed to extract $outputFileName: ${e.message}")
                     outputFile.deleteIfExists()
                     throw e
                 }
             }
-
-            emptyList()
         }
     }
 }
@@ -233,7 +232,7 @@ private fun extractGeneric(
     extractDir: Path,
     xmlExtensions: Set<String>,
     maxFileSizeBytes: Long
-): List<Path> {
+): Sequence<Path> {
     try {
         return archiveFile.inputStream().use { fis ->
             fis.toArchiveInputStream().use { archiveStream ->

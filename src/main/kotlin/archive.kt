@@ -48,22 +48,57 @@ fun extractArchive(
     logger.info("Extracting archive: ${archiveFile.fileName} to $extractDir")
     val fileName = archiveFile.toString()
     fun fileNameEndsWith(sub: String): Boolean = fileName.endsWith(sub, ignoreCase = true)
-    fun extractWithFormatLocal(format: String) = extractWithFormat(archiveFile, extractDir, format, xmlFileExtensions, maxFileSizeBytes)
+
+    fun extractWithFormatLocal(format: String) = extractInternal(
+        archiveFile = archiveFile,
+        extractDir = extractDir,
+        format = format,
+        xmlExtensions = xmlFileExtensions,
+        maxFileSizeBytes = maxFileSizeBytes,
+    )
 
     val extractedFiles = when {
         fileNameEndsWith(".zip") -> extractWithFormatLocal(ArchiveStreamFactory.ZIP)
         fileNameEndsWith(".tar") -> extractWithFormatLocal(ArchiveStreamFactory.TAR)
         fileNameEndsWith(".7z") -> extractWithFormatLocal(ArchiveStreamFactory.SEVEN_Z)
-        fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") ->
-            extractTarGz(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        fileNameEndsWith(".tar.bz2") || fileNameEndsWith(".tbz2") ->
-            extractTarBz2(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        fileNameEndsWith(".gz") ->
-            extractGzip(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        fileNameEndsWith(".bz2") ->
-            extractBzip2(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
-        else ->
-            extractGeneric(archiveFile, extractDir, xmlFileExtensions, maxFileSizeBytes)
+        fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") -> extractInternal(
+            archiveFile = archiveFile,
+            extractDir = extractDir,
+            format = ArchiveStreamFactory.TAR,
+            xmlExtensions = xmlFileExtensions,
+            maxFileSizeBytes = maxFileSizeBytes,
+            compressorFormat = CompressorStreamFactory.GZIP,
+        )
+        fileNameEndsWith(".tar.bz2") || fileNameEndsWith(".tbz2") -> extractInternal(
+            archiveFile = archiveFile,
+            extractDir = extractDir,
+            format = ArchiveStreamFactory.TAR,
+            xmlExtensions = xmlFileExtensions,
+            maxFileSizeBytes = maxFileSizeBytes,
+            compressorFormat = CompressorStreamFactory.BZIP2,
+        )
+        fileNameEndsWith(".gz") -> extractCompressedFile(
+            archiveFile = archiveFile,
+            extractDir = extractDir,
+            xmlExtensions = xmlFileExtensions,
+            maxFileSizeBytes = maxFileSizeBytes,
+            suffixToRemove = ".gz",
+            compressorFormat = CompressorStreamFactory.GZIP
+        )
+        fileNameEndsWith(".bz2") -> extractCompressedFile(
+            archiveFile = archiveFile,
+            extractDir = extractDir,
+            xmlExtensions = xmlFileExtensions,
+            maxFileSizeBytes = maxFileSizeBytes,
+            suffixToRemove = ".bz2",
+            compressorFormat = CompressorStreamFactory.BZIP2
+        )
+        else -> extractGeneric(
+            archiveFile = archiveFile,
+            extractDir = extractDir,
+            xmlExtensions = xmlFileExtensions,
+            maxFileSizeBytes = maxFileSizeBytes,
+        )
     }
 
     // Удаляем архив после успешного извлечения
@@ -140,47 +175,24 @@ private fun InputStream.toCompressorInputStream(format: String): CompressorInput
     return compressorFactory.createCompressorInputStream(format, this)
 }
 
-private fun extractWithFormat(
+private fun extractInternal(
     archiveFile: Path,
     extractDir: Path,
     format: String,
     xmlExtensions: Set<String>,
-    maxFileSizeBytes: Long
-): List<Path> {
-    archiveFile.inputStream().use { inputStream ->
-        return inputStream.toArchiveInputStream(format).use { archiveStream ->
-            extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
-        }
-    }
-}
-
-private fun extractTarGz(
-    archiveFile: Path,
-    extractDir: Path,
-    xmlExtensions: Set<String>,
-    maxFileSizeBytes: Long
-): List<Path> {
-    return archiveFile.inputStream().use { fis ->
-        fis.toCompressorInputStream(CompressorStreamFactory.GZIP).use { gzipStream ->
-            gzipStream.toArchiveInputStream(ArchiveStreamFactory.TAR).use { tarStream ->
-                extractEntries(tarStream, extractDir, xmlExtensions, maxFileSizeBytes)
+    maxFileSizeBytes: Long,
+    compressorFormat: String? = null,
+): List<Path> = archiveFile.inputStream().use { inputStream ->
+    if (compressorFormat != null) {
+        return@use inputStream.toCompressorInputStream(compressorFormat).use { compressedStream ->
+            compressedStream.toArchiveInputStream(format).use { archiveStream ->
+                extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
             }
         }
     }
-}
 
-private fun extractTarBz2(
-    archiveFile: Path,
-    extractDir: Path,
-    xmlExtensions: Set<String>,
-    maxFileSizeBytes: Long
-): List<Path> {
-    return archiveFile.inputStream().use { fis ->
-        fis.toCompressorInputStream(CompressorStreamFactory.BZIP2).use { bzip2Stream ->
-            bzip2Stream.toArchiveInputStream(ArchiveStreamFactory.TAR).use { tarStream ->
-                extractEntries(tarStream, extractDir, xmlExtensions, maxFileSizeBytes)
-            }
-        }
+    inputStream.toArchiveInputStream(format).use { archiveStream ->
+        extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
     }
 }
 
@@ -215,34 +227,6 @@ private fun extractCompressedFile(
         }
     }
 }
-
-private fun extractGzip(
-    archiveFile: Path,
-    extractDir: Path,
-    xmlExtensions: Set<String>,
-    maxFileSizeBytes: Long
-): List<Path> = extractCompressedFile(
-    archiveFile,
-    extractDir,
-    xmlExtensions,
-    maxFileSizeBytes,
-    ".gz",
-    CompressorStreamFactory.GZIP
-)
-
-private fun extractBzip2(
-    archiveFile: Path,
-    extractDir: Path,
-    xmlExtensions: Set<String>,
-    maxFileSizeBytes: Long
-): List<Path> = extractCompressedFile(
-    archiveFile,
-    extractDir,
-    xmlExtensions,
-    maxFileSizeBytes,
-    ".bz2",
-    CompressorStreamFactory.BZIP2
-)
 
 private fun extractGeneric(
     archiveFile: Path,

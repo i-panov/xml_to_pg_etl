@@ -9,6 +9,7 @@ data class MappingTable(
     val xmlFile: String,
     val xmlTag: String,
     val table: String,
+    val schema: String?,
     val uniqueColumns: Set<String>,
     val batchSize: Int,
     val attributes: Map<String, String> // xml : column

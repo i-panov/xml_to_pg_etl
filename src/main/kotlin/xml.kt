@@ -12,32 +12,19 @@ import kotlin.io.path.*
 
 private val logger = Logger.getLogger("XmlParser")
 
-/**
- * Парсит XML элементы с автоматическим определением кодировки
- */
-fun parseXmlElements(file: Path, tag: String): Sequence<Map<String, String>> = sequence {
+fun parseXmlElements(file: Path, tag: String, encoding: Charset? = null): Sequence<Map<String, String>> = sequence {
     if (!file.exists()) {
         logger.warning("File ${file.name} not found")
         return@sequence
     }
 
-    val encoding = detectXmlEncoding(file)
-    logger.info("Detected encoding for ${file.name}: $encoding")
-
-    // Используем перегрузку с явным указанием кодировки
-    yieldAll(parseXmlElementsWithEncoding(file, tag, encoding))
-}
-
-/**
- * Парсит XML элементы с принудительным указанием кодировки
- */
-fun parseXmlElements(file: Path, tag: String, encoding: Charset): Sequence<Map<String, String>> = sequence {
-    if (!file.exists()) {
-        logger.warning("File ${file.name} not found")
-        return@sequence
+    if (encoding != null) {
+        yieldAll(parseXmlElementsWithEncoding(file, tag, encoding))
+    } else {
+        val detectedEncoding = detectXmlEncoding(file)
+        logger.info("Detected encoding for ${file.name}: $detectedEncoding")
+        yieldAll(parseXmlElementsWithEncoding(file, tag, detectedEncoding))
     }
-
-    yieldAll(parseXmlElementsWithEncoding(file, tag, encoding))
 }
 
 private fun parseXmlElementsWithEncoding(

@@ -5,6 +5,7 @@ import kotlinx.cli.ArgType
 import kotlinx.cli.required
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import java.util.logging.Logger
@@ -81,14 +82,21 @@ fun main(args: Array<String>) {
         else -> emptyList()
     }
 
-    xmlFiles.asFlow().flowOn(Dispatchers.IO).onEach { xml ->
-        val mapping = mappings.firstOrNull { m ->
-            Regex(m.xmlFile).matches(xml.fileName.toString())
-        }
+    config.db.createDataSource().use { db ->
+        xmlFiles.asFlow().buffer(8).flowOn(Dispatchers.IO).onEach { xml ->
+            val mapping = mappings.firstOrNull { m ->
+                Regex(m.xmlFile).matches(xml.fileName.toString())
+            }
 
-        if (mapping != null) {
-            parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize).onEach {
-                // upsert it
+            if (mapping != null) {
+                parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize).onEach {
+                    db.connection.upsert(
+                        items = it,
+                        uniqueColumns = mapping.uniqueColumns,
+                        table = mapping.table,
+                        schema = mapping.schema,
+                    )
+                }
             }
         }
     }

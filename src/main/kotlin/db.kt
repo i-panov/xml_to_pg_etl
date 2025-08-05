@@ -1,9 +1,9 @@
 package ru.my
 
-import java.sql.Connection
-import java.sql.DatabaseMetaData
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import java.sql.Connection
+import java.sql.DatabaseMetaData
 
 data class ColumnInfo(
     val name: String,
@@ -11,7 +11,13 @@ data class ColumnInfo(
     val isNullable: Boolean
 )
 
+private val metaCache = mutableMapOf<String, List<ColumnInfo>>()
+
 fun Connection.getTableMetaData(tableName: String, schema: String? = null): List<ColumnInfo> {
+    val cacheKey = (schema.takeIf { !it.isNullOrBlank() }?.let { "$it." } ?: "") + tableName
+
+    metaCache[cacheKey]?.let { return it }
+
     val result = mutableListOf<ColumnInfo>()
 
     metaData.getColumns(null, schema, tableName, null).use { rs ->
@@ -23,6 +29,7 @@ fun Connection.getTableMetaData(tableName: String, schema: String? = null): List
         }
     }
 
+    metaCache[cacheKey] = result
     return result
 }
 
@@ -119,9 +126,6 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         jdbcUrl = dbConfig.jdbcUrl
         username = dbConfig.user
         password = dbConfig.password
-        dbConfig.schema?.let {
-            addDataSourceProperty("currentSchema", it)
-        }
 
         // Оптимальные настройки для высокой нагрузки
         maximumPoolSize = Runtime.getRuntime().availableProcessors() * 4

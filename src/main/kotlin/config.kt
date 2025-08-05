@@ -2,9 +2,10 @@ package ru.my
 
 import com.zaxxer.hikari.HikariDataSource
 import java.io.File
-import java.util.logging.Logger
 import java.nio.file.Path
-import kotlin.io.path.*
+import java.util.logging.Logger
+import kotlin.io.path.exists
+import kotlin.io.path.readLines
 
 data class DbConfig(
     val host: String,
@@ -12,7 +13,6 @@ data class DbConfig(
     val user: String,
     val password: String,
     val database: String,
-    val schema: String? = null,
 ) {
     val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}"
 
@@ -85,7 +85,6 @@ fun loadAppConfig(envPath: Path): AppConfig {
         user = env["DB_USER"] ?: error("DB_USER is required"),
         password = env["DB_PASSWORD"] ?: error("DB_PASSWORD is required"),
         database = env["DB_DATABASE"] ?: error("DB_DATABASE is required"),
-        schema = env["DB_SCHEMA"] // nullable
     )
 
     val cfg = AppConfig(

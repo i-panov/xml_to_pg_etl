@@ -3,14 +3,14 @@ package ru.my
 import kotlinx.cli.ArgParser
 import kotlinx.cli.ArgType
 import kotlinx.cli.required
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.runBlocking
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Logger
 import kotlin.io.path.*
 
+@OptIn(ExperimentalCoroutinesApi::class)
 fun main(args: Array<String>) {
     val logger = Logger.getLogger("Main")
     val parser = ArgParser("XML_TO_PG_ETL")
@@ -63,40 +63,69 @@ fun main(args: Array<String>) {
         error("XML file, directory, or archive not found: $xmlPath")
     }
 
-    val xmlFiles = when {
-        xmlFile.isRegularFile() -> {
-            when {
-                isArchive(xmlFile.toString()) -> {
-                    extractArchive(xmlFile, extractTo).toList()
-                }
-                xmlFile.toString().endsWith(".xml", ignoreCase = true) -> {
-                    listOf(xmlFile)
-                }
-                else -> emptyList()
+    runBlocking {
+        val xmlFilesSequence = when {
+            xmlFile.isDirectory() -> xmlFile.listDirectoryEntries("*.xml")
+                .filter { it.isRegularFile() }.asSequence()
+            xmlFile.isRegularFile() -> when {
+                xmlFile.toString().endsWith(".xml", ignoreCase = true) -> sequenceOf(xmlFile)
+                isArchive(xmlFile.toString()) -> extractArchive(xmlFile, extractTo)
+                else -> emptySequence()
             }
+            else -> emptySequence()
         }
-        xmlFile.isDirectory() -> {
-            xmlFile.listDirectoryEntries("*.xml")
-                .filter { it.isRegularFile() }
-        }
-        else -> emptyList()
-    }
 
-    config.db.createDataSource().use { db ->
-        xmlFiles.asFlow().buffer(8).flowOn(Dispatchers.IO).onEach { xml ->
-            val mapping = mappings.firstOrNull { m ->
-                Regex(m.xmlFile).matches(xml.fileName.toString())
-            }
+        config.db.createDataSource().use { db ->
+            val processedCount = AtomicInteger(0)
+            val errorCount = AtomicInteger(0)
 
-            if (mapping != null) {
-                parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize).onEach {
-                    db.connection.upsert(
-                        items = it,
-                        uniqueColumns = mapping.uniqueColumns,
-                        table = mapping.table,
-                        schema = mapping.schema,
-                    )
+            xmlFilesSequence.asFlow()
+                .flatMapMerge(concurrency = 4) { xml ->
+                    flow {
+                        val mapping = mappings.firstOrNull { m ->
+                            Regex(m.xmlFile).matches(xml.fileName.toString())
+                        }
+
+                        if (mapping != null) {
+                            try {
+                                db.connection.use { conn ->
+                                    var batchCount = 0
+                                    parseXmlElements(xml, mapping.xmlTag)
+                                        .chunked(mapping.batchSize)
+                                        .forEach { batch ->
+                                            conn.upsert(
+                                                items = batch,
+                                                uniqueColumns = mapping.uniqueColumns,
+                                                table = mapping.table,
+                                                schema = mapping.schema,
+                                            )
+                                            batchCount++
+                                        }
+                                    logger.info("Processed ${xml.fileName}: $batchCount batches")
+                                }
+                                processedCount.incrementAndGet()
+                                emit(xml)
+                            } catch (e: Exception) {
+                                errorCount.incrementAndGet()
+                                logger.severe("Failed to process ${xml.fileName}: ${e.message}")
+                                throw e // перебросим для обработки ниже
+                            }
+                        } else {
+                            logger.warning("No mapping found for ${xml.fileName}")
+                        }
+                    }
                 }
+                .catch { e ->
+                    // Логируем ошибку, но продолжаем обработку других файлов
+                    logger.severe("Error in flow: ${e.message}")
+                }
+                .collect()
+
+            val totalFiles = processedCount.get() + errorCount.get()
+            if (totalFiles == 0) {
+                logger.warning("No XML files found to process")
+            } else {
+                logger.info("Processing complete: $totalFiles files found, ${processedCount.get()} processed successfully, ${errorCount.get()} with errors")
             }
         }
     }

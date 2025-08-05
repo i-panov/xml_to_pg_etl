@@ -1,14 +1,19 @@
 package ru.my
 
-import java.io.*
+import java.io.BufferedInputStream
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.logging.Logger
 import javax.xml.stream.XMLInputFactory
-import javax.xml.stream.XMLStreamConstants.*
+import javax.xml.stream.XMLStreamConstants.END_ELEMENT
+import javax.xml.stream.XMLStreamConstants.START_ELEMENT
 import javax.xml.stream.XMLStreamReader
-import kotlin.io.path.*
+import kotlin.io.path.exists
+import kotlin.io.path.inputStream
+import kotlin.io.path.name
 
 private val logger = Logger.getLogger("XmlParser")
 

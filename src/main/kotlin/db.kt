@@ -4,12 +4,19 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import java.sql.Connection
 import java.sql.DatabaseMetaData
+import java.sql.ResultSet
 
 data class ColumnInfo(
     val name: String,
     val type: Int,
     val isNullable: Boolean
-)
+) {
+    constructor(rs: ResultSet): this(
+        name = rs.getString("COLUMN_NAME").lowercase(),
+        type = rs.getInt("DATA_TYPE"),
+        isNullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable,
+    )
+}
 
 private val metaCache = mutableMapOf<String, List<ColumnInfo>>()
 
@@ -22,10 +29,7 @@ fun Connection.getTableMetaData(tableName: String, schema: String? = null): List
 
     metaData.getColumns(null, schema, tableName, null).use { rs ->
         while (rs.next()) {
-            val columnName = rs.getString("COLUMN_NAME").lowercase()
-            val columnType = rs.getInt("DATA_TYPE")
-            val isNullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable
-            result.add(ColumnInfo(columnName, columnType, isNullable))
+            result.add(ColumnInfo(rs))
         }
     }
 
@@ -45,8 +49,10 @@ fun Connection.upsert(
         throw IllegalArgumentException("Items batch is too large: ${items.size}")
     }
 
-    val columns = getTableMetaData(table, schema).also {
-        if (it.isEmpty()) throw IllegalArgumentException("Table $table not found or has no columns")
+    val columns = getTableMetaData(table, schema)
+
+    if (columns.isEmpty()) {
+        throw IllegalArgumentException("Table $table not found or has no columns")
     }
 
     val columnNames = columns.map { it.name.lowercase() }.toSet()
@@ -68,7 +74,7 @@ fun Connection.upsert(
     val quotedTable = if (schema != null) "${quoteIdent(schema)}.${quoteIdent(table)}" else quoteIdent(table)
     val quotedColumns = allColumns.map { quoteIdent(it) }
 
-    val placeholdersForRow = "(" + allColumns.joinToString(", ") { "?" } + ")"
+    val placeholdersForRow = "(" + columns.joinToString(", ") { "?" } + ")"
     val valuesPlaceholders = List(items.size) { placeholdersForRow }.joinToString(", ")
 
     val updateSet = allColumns
@@ -89,6 +95,8 @@ fun Connection.upsert(
             append("DO NOTHING")
         }
     }
+
+    println(sql)
 
     prepareStatement(sql).use { stmt ->
         val prevAutoCommit = autoCommit

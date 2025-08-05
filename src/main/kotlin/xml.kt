@@ -24,7 +24,7 @@ fun parseXmlElements(file: Path, tag: String, encoding: Charset? = null): Sequen
     }
 
     if (encoding != null) {
-        yieldAll(parseXmlElementsWithEncoding(file, tag, encoding))
+        yieldAll(parseXmlElementsWithEncoding(file, tag, EncodingInfo(encoding)))
     } else {
         val detectedEncoding = detectXmlEncoding(file)
         logger.info("Detected encoding for ${file.name}: $detectedEncoding")
@@ -35,7 +35,7 @@ fun parseXmlElements(file: Path, tag: String, encoding: Charset? = null): Sequen
 private fun parseXmlElementsWithEncoding(
     file: Path,
     tag: String,
-    encoding: Charset
+    encodingInfo: EncodingInfo
 ): Sequence<Map<String, String>> = sequence {
     val xmlInputFactory = XMLInputFactory.newInstance().apply {
         setProperty(XMLInputFactory.IS_COALESCING, true)
@@ -50,9 +50,14 @@ private fun parseXmlElementsWithEncoding(
 
     try {
         file.inputStream().use { inputStream ->
+            // Пропускаем BOM если он есть
+            if (encodingInfo.bomSize > 0) {
+                inputStream.skip(encodingInfo.bomSize.toLong())
+            }
+            
             // Буферизация для улучшения производительности
             val bufferedStream = BufferedInputStream(inputStream)
-            val reader = InputStreamReader(bufferedStream, encoding)
+            val reader = InputStreamReader(bufferedStream, encodingInfo.charset)
             val bufferedReader = BufferedReader(reader, 8192)
 
             xmlReader = xmlInputFactory.createXMLStreamReader(bufferedReader)
@@ -103,9 +108,17 @@ private fun parseXmlElementsWithEncoding(
 }
 
 /**
+ * Информация о кодировке XML файла
+ */
+data class EncodingInfo(
+    val charset: Charset,
+    val bomSize: Int = 0
+)
+
+/**
  * Определяет кодировку XML файла из XML declaration или BOM
  */
-fun detectXmlEncoding(file: Path): Charset {
+fun detectXmlEncoding(file: Path): EncodingInfo {
     try {
         file.inputStream().use { inputStream ->
             // Читаем только первые 4 байта для BOM
@@ -114,13 +127,20 @@ fun detectXmlEncoding(file: Path): Charset {
 
             if (bytesRead <= 0) {
                 logger.warning("Empty file ${file.name}, using UTF-8")
-                return StandardCharsets.UTF_8
+                return EncodingInfo(StandardCharsets.UTF_8, 0)
             }
 
             // Проверяем BOM на первых считанных байтах
-            detectBOM(bomBuffer, bytesRead)?.let {
-                logger.fine("Detected BOM encoding: ${it.name()}")
-                return it
+            detectBOM(bomBuffer, bytesRead)?.let { charset ->
+                logger.fine("Detected BOM encoding: ${charset.name()}")
+                // Определяем размер BOM вручную
+                val bomSize = when (charset) {
+                    StandardCharsets.UTF_8 -> 3
+                    StandardCharsets.UTF_16BE, StandardCharsets.UTF_16LE -> 2
+                    Charset.forName("UTF-32BE"), Charset.forName("UTF-32LE") -> 4
+                    else -> 0
+                }
+                return EncodingInfo(charset, bomSize)
             }
 
             // Если BOM нет, проверяем XML declaration
@@ -134,11 +154,12 @@ fun detectXmlEncoding(file: Path): Charset {
 
             // Для декларации используем ASCII-совместимую кодировку
             val headerText = String(headerBuffer, StandardCharsets.US_ASCII)
-            return parseXmlDeclarationEncoding(headerText) ?: StandardCharsets.UTF_8
+            val encoding = parseXmlDeclarationEncoding(headerText) ?: StandardCharsets.UTF_8
+            return EncodingInfo(encoding, 0)
         }
     } catch (e: Exception) {
         logger.warning("Failed to detect encoding for ${file.name}: ${e.message}, using UTF-8")
-        return StandardCharsets.UTF_8
+        return EncodingInfo(StandardCharsets.UTF_8, 0)
     }
 }
 

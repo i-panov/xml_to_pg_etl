@@ -88,6 +88,13 @@ fun main(args: Array<String>) {
 
                         if (mapping != null) {
                             try {
+                                val upserter = PostgresUpserter(
+                                    dataSource = db,
+                                    table = mapping.table,
+                                    schema = mapping.schema,
+                                    uniqueColumns = mapping.uniqueColumns,
+                                )
+
                                 db.connection.use { conn ->
                                     var batchCount = 0
                                     parseXmlElements(xml, mapping.xmlTag)
@@ -99,6 +106,7 @@ fun main(args: Array<String>) {
                                                 table = mapping.table,
                                                 schema = mapping.schema,
                                             )
+                                            upserter.execute(batch)
                                             batchCount++
                                         }
                                     logger.info("Processed ${xml.fileName}: $batchCount batches")

@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import java.sql.Connection
 import java.sql.DatabaseMetaData
+import java.sql.PreparedStatement
 import java.sql.ResultSet
 
 data class ColumnInfo(
@@ -18,23 +19,46 @@ data class ColumnInfo(
     )
 }
 
+fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> = sequence {
+    while (next()) {
+        yield(mapper(this@map))
+    }
+}
+
+fun DatabaseMetaData.getColumnsInfo(table: String, schema: String? = null): List<ColumnInfo> =
+    getColumns(null, schema, table, null).use { it.map(::ColumnInfo).toList() }
+
 private val metaCache = mutableMapOf<String, List<ColumnInfo>>()
 
 fun Connection.getTableMetaData(tableName: String, schema: String? = null): List<ColumnInfo> {
     val cacheKey = (schema.takeIf { !it.isNullOrBlank() }?.let { "$it." } ?: "") + tableName
-
     metaCache[cacheKey]?.let { return it }
-
-    val result = mutableListOf<ColumnInfo>()
-
-    metaData.getColumns(null, schema, tableName, null).use { rs ->
-        while (rs.next()) {
-            result.add(ColumnInfo(rs))
-        }
-    }
-
+    val result = metaData.getColumnsInfo(tableName, schema)
     metaCache[cacheKey] = result
     return result
+}
+
+private inline fun <T> Connection.withTransaction(block: () -> T): T {
+    val prevAutoCommit = autoCommit
+    autoCommit = false
+    return try {
+        val result = block()
+        commit()
+        result
+    } catch (e: Exception) {
+        rollback()
+        throw e
+    } finally {
+        autoCommit = prevAutoCommit
+    }
+}
+
+private fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
+    when {
+        value.isNullOrEmpty() && col.isNullable -> setNull(index, col.type)
+        value.isNullOrEmpty() -> throw IllegalStateException("NOT NULL column '${col.name}' is empty")
+        else -> setString(index, value)
+    }
 }
 
 fun Connection.upsert(
@@ -96,24 +120,39 @@ fun Connection.upsert(
         }
     }
 
-    println(sql)
+    prepareStatement(sql).use { stmt ->
+        withTransaction {
+            itemsNormalized.withIndex().forEach { (itemIndex, item) ->
+                columns.withIndex().forEach { (colIndex, col) ->
+                    stmt.setParameter(
+                        index = itemIndex * columns.size + colIndex + 1,
+                        col = col,
+                        value = item[col.name.lowercase()]
+                    )
+                }
+            }
+            stmt.executeUpdate()
+        }
+    }
 
     prepareStatement(sql).use { stmt ->
         val prevAutoCommit = autoCommit
         autoCommit = false
         try {
-            var paramIndex = 1
-            for (item in itemsNormalized) {
-                for (col in columns) {
+            for ((itemIndex, item) in itemsNormalized.withIndex()) {
+                for ((colIndex, col) in columns.withIndex()) {
+                    // PreparedStatement параметры нумеруются с 1
+                    val paramIndex = itemIndex * columns.size + colIndex + 1
                     val value = item[col.name.lowercase()]
+
                     if (value.isNullOrEmpty()) {
                         if (col.isNullable) {
-                            stmt.setNull(paramIndex++, col.type)
+                            stmt.setNull(paramIndex, col.type)
                         } else {
                             throw IllegalStateException("NOT NULL column '${col.name}' is empty")
                         }
                     } else {
-                        stmt.setString(paramIndex++, value)
+                        stmt.setString(paramIndex, value)
                     }
                 }
             }

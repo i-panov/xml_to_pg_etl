@@ -38,7 +38,7 @@ fun Connection.getTableMetaData(tableName: String, schema: String? = null): List
     return result
 }
 
-private inline fun <T> Connection.withTransaction(block: () -> T): T {
+inline fun <T> Connection.withTransaction(block: () -> T): T {
     val prevAutoCommit = autoCommit
     autoCommit = false
     return try {
@@ -54,11 +54,15 @@ private inline fun <T> Connection.withTransaction(block: () -> T): T {
 }
 
 private fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
-    when {
-        value.isNullOrEmpty() && col.isNullable -> setNull(index, col.type)
-        value.isNullOrEmpty() -> throw IllegalStateException("NOT NULL column '${col.name}' is empty")
-        else -> setString(index, value)
+    if (value.isNullOrEmpty()) {
+        if (col.isNullable) {
+            return setNull(index, col.type)
+        } else {
+            throw IllegalStateException("NOT NULL column '${col.name}' is empty")
+        }
     }
+
+    return setString(index, value)
 }
 
 fun Connection.upsert(
@@ -125,6 +129,7 @@ fun Connection.upsert(
             itemsNormalized.withIndex().forEach { (itemIndex, item) ->
                 columns.withIndex().forEach { (colIndex, col) ->
                     stmt.setParameter(
+                        // PreparedStatement параметры нумеруются с 1
                         index = itemIndex * columns.size + colIndex + 1,
                         col = col,
                         value = item[col.name.lowercase()]
@@ -132,38 +137,6 @@ fun Connection.upsert(
                 }
             }
             stmt.executeUpdate()
-        }
-    }
-
-    prepareStatement(sql).use { stmt ->
-        val prevAutoCommit = autoCommit
-        autoCommit = false
-        try {
-            for ((itemIndex, item) in itemsNormalized.withIndex()) {
-                for ((colIndex, col) in columns.withIndex()) {
-                    // PreparedStatement параметры нумеруются с 1
-                    val paramIndex = itemIndex * columns.size + colIndex + 1
-                    val value = item[col.name.lowercase()]
-
-                    if (value.isNullOrEmpty()) {
-                        if (col.isNullable) {
-                            stmt.setNull(paramIndex, col.type)
-                        } else {
-                            throw IllegalStateException("NOT NULL column '${col.name}' is empty")
-                        }
-                    } else {
-                        stmt.setString(paramIndex, value)
-                    }
-                }
-            }
-
-            stmt.executeUpdate()
-            commit()
-        } catch (e: Exception) {
-            rollback()
-            throw e
-        } finally {
-            autoCommit = prevAutoCommit
         }
     }
 }

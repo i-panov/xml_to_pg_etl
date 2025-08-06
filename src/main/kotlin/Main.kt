@@ -33,6 +33,7 @@ fun main(args: Array<String>) {
         description = "Directory for archive extraction (temporary if not specified)",
     )
 
+    // TODO: создавать временную папку только если параметр xml это архив
     val extractTo = extractDir?.let {
         Path(it).createDirectories().absolute()
     } ?: createTempDirectory("xml_to_pg_etl_").absolute()
@@ -65,8 +66,9 @@ fun main(args: Array<String>) {
 
     runBlocking {
         val xmlFilesSequence = when {
-            xmlFile.isDirectory() -> xmlFile.listDirectoryEntries("*.xml")
-                .filter { it.isRegularFile() }.asSequence()
+            xmlFile.isDirectory() -> xmlFile.walk().filter {
+                it.extension.equals("xml", true) && it.isRegularFile()
+            }
             xmlFile.isRegularFile() -> when {
                 xmlFile.toString().endsWith(".xml", ignoreCase = true) -> sequenceOf(xmlFile)
                 isArchive(xmlFile.toString()) -> extractArchive(xmlFile, extractTo)

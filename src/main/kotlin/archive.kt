@@ -1,7 +1,5 @@
 package ru.my
 
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
@@ -19,18 +17,6 @@ private val logger = Logger.getLogger("ArchiveExtractor")
 private const val BUFFER_SIZE = 8192
 // Максимальный размер файла для извлечения (например, 1GB)
 private const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
-
-fun extractArchiveFlow(
-    archiveFile: Path,
-    extractDir: Path,
-    xmlFileExtensions: Set<String> = setOf("xml"),
-    maxFileSizeBytes: Long = MAX_FILE_SIZE
-): Flow<Path> = extractArchive(
-    archiveFile = archiveFile,
-    extractDir = extractDir,
-    xmlFileExtensions = xmlFileExtensions,
-    maxFileSizeBytes = maxFileSizeBytes
-).asFlow().flowOn(Dispatchers.IO)
 
 /**
  * Универсальная функция для извлечения архивов различных форматов с streaming обработкой

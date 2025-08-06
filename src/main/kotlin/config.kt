@@ -39,7 +39,7 @@ data class AppConfig(
             throw IllegalArgumentException("Mappings file not exists: $mappingsFile")
         }
 
-        return parseMappings(file)
+        return MappingTable.parseItems(file)
     }
 
     fun validate() {

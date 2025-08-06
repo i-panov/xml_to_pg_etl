@@ -43,12 +43,17 @@ class PostgresUpserter(
         }
     }
 
+    // TODO: возможно стоит при парсинге XML не преобразовывать все-таки значения в строку, а оставлять как есть
+    // Теперь, когда в PreparedStatement.setParameter есть маппинг по типам, возможно это уменьшило бы количество
+    // преобразований и сделало процесс быстрее. Задача на перспективу: проверить эту теорию.
     fun execute(items: List<Map<String, String>>) {
         if (items.isEmpty()) return
 
         if (items.size > 1_000_000) {
             throw IllegalArgumentException("Items batch is too large: ${items.size}")
         }
+
+        // TODO: сравнивать схему из базы со списком столбцов в items и брать только те столбцы которые переданы в items
 
         val itemsNormalized = items.map { item ->
             item.entries.associate { (k, v) -> k.lowercase() to v }

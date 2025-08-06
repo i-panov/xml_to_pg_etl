@@ -2,8 +2,28 @@ package ru.my
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import kotlinx.coroutines.delay
 import java.math.BigDecimal
 import java.sql.*
+
+fun createDataSource(dbConfig: DbConfig): HikariDataSource {
+    val config = HikariConfig().apply {
+        jdbcUrl = dbConfig.jdbcUrl
+        username = dbConfig.user
+        password = dbConfig.password
+
+        // Оптимальные настройки для высокой нагрузки
+        maximumPoolSize = Runtime.getRuntime().availableProcessors() * 4
+        minimumIdle = maximumPoolSize / 2
+        connectionTimeout = 30_000
+        idleTimeout = 600_000
+        maxLifetime = 1_800_000
+        validationTimeout = 3_000
+        leakDetectionThreshold = 60_000
+        isAutoCommit = false
+    }
+    return HikariDataSource(config)
+}
 
 data class ColumnInfo(
     val name: String,
@@ -16,6 +36,10 @@ data class ColumnInfo(
         isNullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable,
     )
 }
+
+//-----------------------------------------------------------------------------------------------------------
+// EXTENSIONS
+//-----------------------------------------------------------------------------------------------------------
 
 fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> = sequence {
     while (next()) {
@@ -95,21 +119,42 @@ fun hexToBytes(hex: String): ByteArray {
     return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 }
 
-fun createDataSource(dbConfig: DbConfig): HikariDataSource {
-    val config = HikariConfig().apply {
-        jdbcUrl = dbConfig.jdbcUrl
-        username = dbConfig.user
-        password = dbConfig.password
+// TODO: Возможно стоит использовать эту заготовку
+suspend fun <T> retryOnDbError(
+    times: Int = 3,
+    initialDelay: Long = 100,
+    block: suspend () -> T
+): T {
+    var lastException: Exception? = null
+    var delay = initialDelay
 
-        // Оптимальные настройки для высокой нагрузки
-        maximumPoolSize = Runtime.getRuntime().availableProcessors() * 4
-        minimumIdle = maximumPoolSize / 2
-        connectionTimeout = 30_000
-        idleTimeout = 600_000
-        maxLifetime = 1_800_000
-        validationTimeout = 3_000
-        leakDetectionThreshold = 60_000
-        isAutoCommit = false
+    repeat(times) { attempt ->
+        try {
+            return block()
+        } catch (e: SQLException) {
+            lastException = e
+
+            // Проверяем, стоит ли повторять
+            when (e.sqlState) {
+                "40001", // serialization_failure
+                "40P01", // deadlock_detected
+                "08000", // connection_exception
+                "08006"  // connection_failure
+                    -> {
+                    if (attempt < times - 1) {
+                        delay(delay)
+                        delay *= 2 // экспоненциальная задержка
+                    }
+                }
+                else -> throw e // не повторяем для других ошибок
+            }
+        }
     }
-    return HikariDataSource(config)
+
+    throw lastException!!
 }
+
+//// Использование:
+//retryOnDbError {
+//    postgresUpserter.execute(...)
+//}

@@ -57,12 +57,14 @@ data class MappingTable(
 
         return errors
     }
-}
 
-fun parseMappings(file: File): List<MappingTable> {
-    val mapper = jacksonObjectMapper().apply {
-        configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    companion object {
+        fun parseItems(file: File): List<MappingTable> {
+            val mapper = jacksonObjectMapper().apply {
+                configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            }
+
+            return mapper.readValue(file)
+        }
     }
-
-    return mapper.readValue(file)
 }

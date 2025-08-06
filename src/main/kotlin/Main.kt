@@ -100,12 +100,6 @@ fun main(args: Array<String>) {
                                     parseXmlElements(xml, mapping.xmlTag)
                                         .chunked(mapping.batchSize)
                                         .forEach { batch ->
-                                            conn.upsert(
-                                                items = batch,
-                                                uniqueColumns = mapping.uniqueColumns,
-                                                table = mapping.table,
-                                                schema = mapping.schema,
-                                            )
                                             upserter.execute(batch)
                                             batchCount++
                                         }

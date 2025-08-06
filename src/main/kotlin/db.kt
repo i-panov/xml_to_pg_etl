@@ -28,16 +28,6 @@ fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> = sequence {
 fun DatabaseMetaData.getColumnsInfo(table: String, schema: String? = null): List<ColumnInfo> =
     getColumns(null, schema, table, null).use { it.map(::ColumnInfo).toList() }
 
-private val metaCache = mutableMapOf<String, List<ColumnInfo>>()
-
-fun Connection.getTableMetaData(tableName: String, schema: String? = null): List<ColumnInfo> {
-    val cacheKey = (schema.takeIf { !it.isNullOrBlank() }?.let { "$it." } ?: "") + tableName
-    metaCache[cacheKey]?.let { return it }
-    val result = metaData.getColumnsInfo(tableName, schema)
-    metaCache[cacheKey] = result
-    return result
-}
-
 inline fun <T> Connection.withTransaction(block: () -> T): T {
     val prevAutoCommit = autoCommit
     autoCommit = false
@@ -53,7 +43,7 @@ inline fun <T> Connection.withTransaction(block: () -> T): T {
     }
 }
 
-private fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
+fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
     if (value.isNullOrEmpty()) {
         if (col.isNullable) {
             return setNull(index, col.type)
@@ -63,82 +53,6 @@ private fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: S
     }
 
     return setString(index, value)
-}
-
-fun Connection.upsert(
-    items: List<Map<String, String>>,
-    uniqueColumns: Set<String>,
-    table: String,
-    schema: String? = null
-) {
-    if (items.isEmpty()) return
-
-    if (items.size > 1_000_000) {
-        throw IllegalArgumentException("Items batch is too large: ${items.size}")
-    }
-
-    val columns = getTableMetaData(table, schema)
-
-    if (columns.isEmpty()) {
-        throw IllegalArgumentException("Table $table not found or has no columns")
-    }
-
-    val columnNames = columns.map { it.name.lowercase() }.toSet()
-
-    if (!uniqueColumns.all { it.lowercase() in columnNames }) {
-        val missingColumns = uniqueColumns.filterNot { it.lowercase() in columnNames }
-        throw IllegalArgumentException(
-            "Unique columns not found in table $table: ${missingColumns.joinToString()}"
-        )
-    }
-
-    val itemsNormalized = items.map { item ->
-        item.entries.associate { (k, v) -> k.lowercase() to v }
-    }
-
-    val allColumns = columns.map { it.name }
-
-    fun quoteIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
-    val quotedTable = if (schema != null) "${quoteIdent(schema)}.${quoteIdent(table)}" else quoteIdent(table)
-    val quotedColumns = allColumns.map { quoteIdent(it) }
-
-    val placeholdersForRow = "(" + columns.joinToString(", ") { "?" } + ")"
-    val valuesPlaceholders = List(items.size) { placeholdersForRow }.joinToString(", ")
-
-    val updateSet = allColumns
-        .filterNot { col -> uniqueColumns.any { it.lowercase() == col.lowercase() } }
-        .joinToString(", ") { "${quoteIdent(it)} = EXCLUDED.${quoteIdent(it)}" }
-
-    val conflictTarget = uniqueColumns.joinToString(", ") { quoteIdent(it) }
-
-    val sql = buildString {
-        append("INSERT INTO $quotedTable (")
-        append(quotedColumns.joinToString(", "))
-        append(") VALUES ")
-        append(valuesPlaceholders)
-        append(" ON CONFLICT ($conflictTarget) ")
-        if (updateSet.isNotEmpty()) {
-            append("DO UPDATE SET $updateSet")
-        } else {
-            append("DO NOTHING")
-        }
-    }
-
-    prepareStatement(sql).use { stmt ->
-        withTransaction {
-            itemsNormalized.withIndex().forEach { (itemIndex, item) ->
-                columns.withIndex().forEach { (colIndex, col) ->
-                    stmt.setParameter(
-                        // PreparedStatement параметры нумеруются с 1
-                        index = itemIndex * columns.size + colIndex + 1,
-                        col = col,
-                        value = item[col.name.lowercase()]
-                    )
-                }
-            }
-            stmt.executeUpdate()
-        }
-    }
 }
 
 fun createDataSource(dbConfig: DbConfig): HikariDataSource {

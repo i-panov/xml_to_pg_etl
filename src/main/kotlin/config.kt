@@ -29,8 +29,8 @@ data class DbConfig(
 data class AppConfig(
     val db: DbConfig,
     val mappingsFile: String,
-    val removeArchivesAfterUnpack: Boolean = false,
-    val removeXmlAfterImport: Boolean = false,
+    val removeArchivesAfterUnpack: Boolean = false, // TODO: реализовать
+    val removeXmlAfterImport: Boolean = false, // TODO: реализовать
 ) {
     fun loadMappings(): List<MappingTable> {
         val file = File(mappingsFile)

@@ -4,16 +4,16 @@ import kotlinx.cli.ArgParser
 import kotlinx.cli.ArgType
 import kotlinx.cli.required
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Logger
 import kotlin.io.path.*
 
-enum class PathType { FILE, DIR }
-
-enum class FileType { ARCHIVE, XML }
+enum class PathType { DIR, ARCHIVE, XML }
 
 @OptIn(ExperimentalPathApi::class)
 class XmlState(val path: Path, val extractDir: String?) {
@@ -25,21 +25,16 @@ class XmlState(val path: Path, val extractDir: String?) {
 
     val pathType: PathType = when {
         path.isDirectory() -> PathType.DIR
-        path.isRegularFile() -> PathType.FILE
+        path.isRegularFile() -> when {
+            path.toString().endsWith(".xml", ignoreCase = true) -> PathType.XML
+            isArchive(path.toString()) -> PathType.ARCHIVE
+            else -> throw IllegalArgumentException("Unsupported xml path: $path")
+        }
         else -> throw IllegalArgumentException("Unsupported xml path: $path")
     }
 
-    val fileType: FileType? = when (pathType) {
-        PathType.FILE -> when {
-            path.toString().endsWith(".xml", ignoreCase = true) -> FileType.XML
-            isArchive(path.toString()) -> FileType.ARCHIVE
-            else -> null
-        }
-        else -> null
-    }
-
-    val pathToExtractArchive = when (fileType) {
-        FileType.ARCHIVE -> extractDir?.let {
+    val pathToExtractArchive = when (pathType) {
+        PathType.ARCHIVE -> extractDir?.let {
             Path(it).createDirectories().absolute()
         } ?: createTempDirectory("xml_to_pg_etl_").absolute()
         else -> null
@@ -49,26 +44,20 @@ class XmlState(val path: Path, val extractDir: String?) {
         PathType.DIR -> path.walk().filter {
             it.extension.equals("xml", true) && it.isRegularFile()
         }
-        PathType.FILE -> when (fileType) {
-            FileType.XML -> sequenceOf(path)
-            FileType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!) // todo: распараллелить разархивацию
-            else -> throw IllegalArgumentException("Unsupported file type: $path")
-        }
+        PathType.XML -> sequenceOf(path)
+        PathType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!) // todo: распараллелить разархивацию
     }
 
     fun removeArchive() {
-        if (fileType == FileType.ARCHIVE) {
+        if (pathType == PathType.ARCHIVE) {
             path.deleteIfExists()
         }
     }
 
-    fun removeXml(): Any? = when (pathType) {
+    fun removeXml(): Any = when (pathType) {
         PathType.DIR -> path.deleteRecursively()
-        PathType.FILE -> when (fileType) {
-            FileType.XML -> path.deleteIfExists()
-            FileType.ARCHIVE -> pathToExtractArchive?.deleteRecursively()
-            else -> Unit
-        }
+        PathType.XML -> path.deleteIfExists()
+        PathType.ARCHIVE -> pathToExtractArchive?.deleteRecursively() ?: Unit
     }
 }
 
@@ -139,18 +128,35 @@ fun main(args: Array<String>) {
 
                             var batchCount = 0
 
-                            // todo: распараллелить парсинг xml, чтобы пока парсится следующий блок
-                            // уже начиналась вставка (сейчас синхронно, парсинг приостанавливается пока идет вставка)
-                            for (batch in parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize)) {
-                                val mappedBatch = batch.map { item ->
-                                    mapping.attributes.entries.mapNotNull {
-                                        (tag, col) -> item[tag]?.let { value -> col to value }
-                                    }.toMap()
-                                }
+                            // Pipeline: парсинг и вставка в параллельных корутинах
+                            val batchChannel = Channel<List<Map<String, String>>>(capacity = 2)
 
+                            // Producer - парсит XML и готовит batch'и
+                            val producerJob = launch {
+                                try {
+                                    parseXmlElements(xml, mapping.xmlTag)
+                                        .chunked(mapping.batchSize)
+                                        .forEach { batch ->
+                                            val mappedBatch = batch.map { item ->
+                                                mapping.attributes.entries.mapNotNull { (tag, col) ->
+                                                    item[tag]?.let { value -> col to value }
+                                                }.toMap()
+                                            }
+                                            batchChannel.send(mappedBatch)
+                                        }
+                                } finally {
+                                    batchChannel.close()
+                                }
+                            }
+
+                            // Consumer - забирает готовые batch'и и вставляет в БД
+                            for (mappedBatch in batchChannel) {
                                 upserter.execute(mappedBatch)
                                 batchCount++
                             }
+
+                            // Ждем завершения producer'а (на всякий случай)
+                            producerJob.join()
 
                             logger.info("Processed ${xml.fileName}: $batchCount batches")
                             processedCount.incrementAndGet()

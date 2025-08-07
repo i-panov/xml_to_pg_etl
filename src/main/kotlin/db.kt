@@ -72,12 +72,19 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
             throw IllegalStateException("NOT NULL column '${col.name}' cannot be null")
         }
     } else {
+        fun hexToBytes(hex: String): ByteArray {
+            require(hex.length % 2 == 0) { "Hex string must have even length" }
+            return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        }
+
+        fun parseBoolean(value: String): Boolean = sequenceOf("1", "true").contains(value);
+
         when (col.type) {
             Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
             Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR,
             Types.CLOB, Types.NCLOB, Types.ROWID -> setString(index, value)
 
-            Types.BIT, Types.BOOLEAN -> setBoolean(index, value.toBoolean())
+            Types.BIT, Types.BOOLEAN -> setBoolean(index, parseBoolean(value))
 
             Types.TINYINT -> setByte(index, value.toByte())
             Types.SMALLINT -> setShort(index, value.toShort())
@@ -111,9 +118,4 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
             else -> throw IllegalArgumentException("Unknown type: ${col.type}")
         }
     }
-}
-
-fun hexToBytes(hex: String): ByteArray {
-    require(hex.length % 2 == 0) { "Hex string must have even length" }
-    return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 }

@@ -6,9 +6,71 @@ import kotlinx.cli.required
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Logger
 import kotlin.io.path.*
+
+enum class PathType { FILE, DIR }
+
+enum class FileType { ARCHIVE, XML }
+
+@OptIn(ExperimentalPathApi::class)
+class XmlState(val path: Path, val extractDir: String?) {
+    init {
+        if (!path.exists()) {
+            error("XML file, directory, or archive not found: $path")
+        }
+    }
+
+    val pathType: PathType = when {
+        path.isDirectory() -> PathType.DIR
+        path.isRegularFile() -> PathType.FILE
+        else -> throw IllegalArgumentException("Unsupported xml path: $path")
+    }
+
+    val fileType: FileType? = when (pathType) {
+        PathType.FILE -> when {
+            path.toString().endsWith(".xml", ignoreCase = true) -> FileType.XML
+            isArchive(path.toString()) -> FileType.ARCHIVE
+            else -> null
+        }
+        else -> null
+    }
+
+    val pathToExtractArchive = when (fileType) {
+        FileType.ARCHIVE -> extractDir?.let {
+            Path(it).createDirectories().absolute()
+        } ?: createTempDirectory("xml_to_pg_etl_").absolute()
+        else -> null
+    }
+
+    val xmlFiles: Sequence<Path> = when (pathType) {
+        PathType.DIR -> path.walk().filter {
+            it.extension.equals("xml", true) && it.isRegularFile()
+        }
+        PathType.FILE -> when (fileType) {
+            FileType.XML -> sequenceOf(path)
+            FileType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!)
+            else -> throw IllegalArgumentException("Unsupported file type: $path")
+        }
+    }
+
+    fun removeArchive() {
+        if (fileType == FileType.ARCHIVE) {
+            path.deleteIfExists()
+        }
+    }
+
+    fun removeXml(): Any? = when (pathType) {
+        PathType.DIR -> path.deleteRecursively()
+        PathType.FILE -> when (fileType) {
+            FileType.XML -> path.deleteIfExists()
+            FileType.ARCHIVE -> pathToExtractArchive?.deleteRecursively()
+            else -> Unit
+        }
+    }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 fun main(args: Array<String>) {
@@ -33,11 +95,6 @@ fun main(args: Array<String>) {
         description = "Directory for archive extraction (temporary if not specified)",
     )
 
-    // TODO: создавать временную папку только если параметр xml это архив
-    val extractTo = extractDir?.let {
-        Path(it).createDirectories().absolute()
-    } ?: createTempDirectory("xml_to_pg_etl_").absolute()
-
     parser.parse(args)
 
     logger.info("ENV file: $envPath")
@@ -58,72 +115,51 @@ fun main(args: Array<String>) {
         error("Has mapping errors")
     }
 
-    val xmlFile = Path(xmlPath)
-
-    if (!xmlFile.exists()) {
-        error("XML file, directory, or archive not found: $xmlPath")
-    }
+    val xmlState = XmlState(Path(xmlPath), extractDir)
 
     runBlocking {
-        val xmlFilesSequence = when {
-            xmlFile.isDirectory() -> xmlFile.walk().filter {
-                it.extension.equals("xml", true) && it.isRegularFile()
-            }
-            xmlFile.isRegularFile() -> when {
-                xmlFile.toString().endsWith(".xml", ignoreCase = true) -> sequenceOf(xmlFile)
-                isArchive(xmlFile.toString()) -> extractArchive(xmlFile, extractTo)
-                else -> emptySequence()
-            }
-            else -> emptySequence()
-        }
-
         config.db.createDataSource().use { db ->
             val processedCount = AtomicInteger(0)
             val errorCount = AtomicInteger(0)
 
-            xmlFilesSequence.asFlow()
-                .flatMapMerge(concurrency = 4) { xml ->
-                    flow {
-                        val mapping = mappings.firstOrNull { m ->
-                            Regex(m.xmlFile).matches(xml.fileName.toString())
-                        }
+            xmlState.xmlFiles.asFlow().flatMapMerge(concurrency = 4) { xml ->
+                flow {
+                    val mapping = mappings.firstOrNull { m ->
+                        Regex(m.xmlFile).matches(xml.fileName.toString())
+                    }
 
-                        if (mapping != null) {
-                            try {
-                                val upserter = PostgresUpserter(
-                                    dataSource = db,
-                                    table = mapping.table,
-                                    schema = mapping.schema,
-                                    uniqueColumns = mapping.uniqueColumns,
-                                )
+                    if (mapping != null) {
+                        try {
+                            val upserter = PostgresUpserter(
+                                dataSource = db,
+                                table = mapping.table,
+                                schema = mapping.schema,
+                                uniqueColumns = mapping.uniqueColumns,
+                            )
 
-                                db.connection.use { conn ->
-                                    var batchCount = 0
-                                    parseXmlElements(xml, mapping.xmlTag)
-                                        .chunked(mapping.batchSize)
-                                        .forEach { batch ->
-                                            upserter.execute(batch)
-                                            batchCount++
-                                        }
-                                    logger.info("Processed ${xml.fileName}: $batchCount batches")
-                                }
-                                processedCount.incrementAndGet()
-                                emit(xml)
-                            } catch (e: Exception) {
-                                errorCount.incrementAndGet()
-                                logger.severe("Failed to process ${xml.fileName}: ${e.message}")
-                                throw e // перебросим для обработки ниже
+                            var batchCount = 0
+
+                            for (batch in parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize)) {
+                                upserter.execute(batch)
+                                batchCount++
                             }
-                        } else {
-                            logger.warning("No mapping found for ${xml.fileName}")
+
+                            logger.info("Processed ${xml.fileName}: $batchCount batches")
+                            processedCount.incrementAndGet()
+                            emit(xml)
+                        } catch (e: Exception) {
+                            errorCount.incrementAndGet()
+                            logger.severe("Failed to process ${xml.fileName}: ${e.message}")
+                            throw e // перебросим для обработки ниже
                         }
+                    } else {
+                        logger.warning("No mapping found for ${xml.fileName}")
                     }
                 }
-                .catch { e ->
-                    // Логируем ошибку, но продолжаем обработку других файлов
-                    logger.severe("Error in flow: ${e.message}")
-                }
-                .collect()
+            }.catch { e ->
+                // Логируем ошибку, но продолжаем обработку других файлов
+                logger.severe("Error in flow: ${e.message}")
+            }.collect()
 
             val totalFiles = processedCount.get() + errorCount.get()
             if (totalFiles == 0) {
@@ -132,5 +168,13 @@ fun main(args: Array<String>) {
                 logger.info("Processing complete: $totalFiles files found, ${processedCount.get()} processed successfully, ${errorCount.get()} with errors")
             }
         }
+    }
+
+    if (config.removeArchivesAfterUnpack) {
+        xmlState.removeArchive()
+    }
+
+    if (config.removeXmlAfterImport) {
+        xmlState.removeXml()
     }
 }

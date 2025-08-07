@@ -51,7 +51,7 @@ class XmlState(val path: Path, val extractDir: String?) {
         }
         PathType.FILE -> when (fileType) {
             FileType.XML -> sequenceOf(path)
-            FileType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!)
+            FileType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!) // todo: распараллелить разархивацию
             else -> throw IllegalArgumentException("Unsupported file type: $path")
         }
     }
@@ -139,6 +139,8 @@ fun main(args: Array<String>) {
 
                             var batchCount = 0
 
+                            // todo: распараллелить парсинг xml, чтобы пока парсится следующий блок
+                            // уже начиналась вставка (сейчас синхронно, парсинг приостанавливается пока идет вставка)
                             for (batch in parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize)) {
                                 val mappedBatch = batch.map { item ->
                                     mapping.attributes.entries.mapNotNull {

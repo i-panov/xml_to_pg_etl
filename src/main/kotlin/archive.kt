@@ -34,6 +34,9 @@ fun extractArchive(
     xmlFileExtensions: Set<String> = setOf("xml"),
     maxFileSizeBytes: Long = MAX_FILE_SIZE
 ): Sequence<Path> = sequence {
+    // TODO: протестировать разархивацию, у меня не сработала на zip архиве.
+    // Просто папка создалась пустая и вышло с сообщением что нет файлов.
+
     if (!archiveFile.exists()) {
         throw IllegalArgumentException("Archive file not found: $archiveFile")
     }

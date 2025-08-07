@@ -140,7 +140,13 @@ fun main(args: Array<String>) {
                             var batchCount = 0
 
                             for (batch in parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize)) {
-                                upserter.execute(batch)
+                                val mappedBatch = batch.map { item ->
+                                    mapping.attributes.entries.mapNotNull {
+                                        (tag, col) -> item[tag]?.let { value -> col to value }
+                                    }.toMap()
+                                }
+
+                                upserter.execute(mappedBatch)
                                 batchCount++
                             }
 

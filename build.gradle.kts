@@ -1,5 +1,7 @@
 plugins {
     kotlin("jvm") version "2.1.10"
+    id("com.github.johnrengelman.shadow") version "7.1.2"
+    application
 }
 
 group = "ru.my"
@@ -7,6 +9,10 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+}
+
+application {
+    mainClass = "ru.my.MainKt"
 }
 
 dependencies {

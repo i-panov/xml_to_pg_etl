@@ -26,14 +26,14 @@ private const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
  *
  * @param archiveFile путь к архиву
  * @param extractDir папка для извлечения
- * @param xmlFileExtensions расширения XML файлов для извлечения
+ * @param checkerFileNameForExtract функция для проверки имени файла
  * @param maxFileSizeBytes максимальный размер извлекаемого файла в байтах
- * @return список путей к извлеченным XML файлам
+ * @return список путей к извлеченным файлам
  */
 fun extractArchive(
     archiveFile: Path,
     extractDir: Path,
-    xmlFileExtensions: Set<String> = setOf("xml"),
+    checkerFileNameForExtract: (String) -> Boolean = { true },
     maxFileSizeBytes: Long = MAX_FILE_SIZE
 ): Sequence<Path> = sequence {
     // TODO: протестировать разархивацию, у меня не сработала на zip архиве.
@@ -56,7 +56,7 @@ fun extractArchive(
         archiveFile = archiveFile,
         extractDir = extractDir,
         format = format,
-        xmlExtensions = xmlFileExtensions,
+        checkerFileNameForExtract = checkerFileNameForExtract,
         maxFileSizeBytes = maxFileSizeBytes,
         compressorFormat = compressorFormat,
     )
@@ -64,7 +64,7 @@ fun extractArchive(
     fun extractInternalCompressed(suffixToRemove: String, compressorFormat: String) = extractCompressedFile(
         archiveFile = archiveFile,
         extractDir = extractDir,
-        xmlExtensions = xmlFileExtensions,
+        checkerFileNameForExtract = checkerFileNameForExtract,
         maxFileSizeBytes = maxFileSizeBytes,
         suffixToRemove = suffixToRemove,
         compressorFormat = compressorFormat
@@ -85,7 +85,7 @@ fun extractArchive(
         else -> extractGeneric(
             archiveFile = archiveFile,
             extractDir = extractDir,
-            xmlExtensions = xmlFileExtensions,
+            checkerFileNameForExtract = checkerFileNameForExtract,
             maxFileSizeBytes = maxFileSizeBytes,
         )
     }
@@ -99,15 +99,15 @@ fun extractArchive(
 private fun extractEntries(
     archiveStream: ArchiveInputStream<out ArchiveEntry>,
     extractDir: Path,
-    xmlExtensions: Set<String>,
+    checkerFileNameForExtract: (String) -> Boolean,
     maxFileSizeBytes: Long
 ): Sequence<Path> = sequence {
     for (entry in archiveStream.iterateEntries()) {
-        if (entry.isDirectory || !isXmlFile(entry.name, xmlExtensions)) {
+        if (entry.isDirectory || !checkerFileNameForExtract(entry.name)) {
             continue
         }
 
-        if (entry.size > maxFileSizeBytes) {
+        if (entry.size != -1L && entry.size > maxFileSizeBytes) {
             logger.warning("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
             continue
         }
@@ -116,7 +116,12 @@ private fun extractEntries(
         outputFile.parent.createDirectories()
 
         try {
-            streamingCopy(archiveStream, outputFile, entry.size)
+            if (entry.size != -1L) {
+                streamingCopy(archiveStream, outputFile, entry.size)
+            } else {
+                streamingCopyWithLimit(archiveStream, outputFile, maxFileSizeBytes)
+            }
+
             yield(outputFile)
             logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
         } catch (e: Exception) {
@@ -130,17 +135,16 @@ private fun extractEntries(
 private fun extractCompressedFile(
     archiveFile: Path,
     extractDir: Path,
-    xmlExtensions: Set<String>,
+    checkerFileNameForExtract: (String) -> Boolean,
     maxFileSizeBytes: Long,
     suffixToRemove: String,
     compressorFormat: String
 ): Sequence<Path> = sequence {
     archiveFile.inputStream().use { fis ->
         fis.toCompressorInputStream(compressorFormat).use { compressedStream ->
-            // TODO: Похоже на ошибку: зачем удалять расширение перед проверкой расширения?
             val outputFileName = archiveFile.fileName.toString().removeSuffix(suffixToRemove)
 
-            if (isXmlFile(outputFileName, xmlExtensions)) {
+            if (checkerFileNameForExtract(outputFileName)) {
                 val outputFile = extractDir.resolve(sanitizeFileName(outputFileName))
                 outputFile.parent.createDirectories()
 
@@ -162,15 +166,18 @@ private fun extractInternal(
     archiveFile: Path,
     extractDir: Path,
     format: String,
-    xmlExtensions: Set<String>,
+    checkerFileNameForExtract: (String) -> Boolean,
     maxFileSizeBytes: Long,
     compressorFormat: String? = null,
 ): Sequence<Path> = archiveFile.inputStream().use { inputStream ->
-    val stream = if (compressorFormat != null) inputStream.toCompressorInputStream(compressorFormat) else inputStream
+    val stream = if (compressorFormat.isNullOrBlank())
+        inputStream
+    else
+        inputStream.toCompressorInputStream(compressorFormat)
 
     stream.use {
         it.toArchiveInputStream(format).use { archiveStream ->
-            extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
+            extractEntries(archiveStream, extractDir, checkerFileNameForExtract, maxFileSizeBytes)
         }
     }
 }
@@ -178,13 +185,13 @@ private fun extractInternal(
 private fun extractGeneric(
     archiveFile: Path,
     extractDir: Path,
-    xmlExtensions: Set<String>,
+    checkerFileNameForExtract: (String) -> Boolean,
     maxFileSizeBytes: Long
 ): Sequence<Path> {
     try {
         return archiveFile.inputStream().use { fis ->
             fis.toArchiveInputStream().use { archiveStream ->
-                extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
+                extractEntries(archiveStream, extractDir, checkerFileNameForExtract, maxFileSizeBytes)
             }
         }
     } catch (e: Exception) {
@@ -257,7 +264,7 @@ private fun streamingCopyWithLimit(source: InputStream, destination: Path, maxBy
 
 private fun sanitizeFileName(fileName: String) = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
-private fun isXmlFile(fileName: String, extensions: Set<String>): Boolean {
+fun isXmlFile(fileName: String, extensions: Set<String>): Boolean {
     val ext = fileName.substringAfterLast('.', "").lowercase()
     return extensions.any { it.equals(ext, ignoreCase = true) }
 }

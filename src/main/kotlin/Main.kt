@@ -45,7 +45,11 @@ class XmlState(val path: Path, val extractDir: String?) {
             it.extension.equals("xml", true) && it.isRegularFile()
         }
         PathType.XML -> sequenceOf(path)
-        PathType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!) // todo: распараллелить разархивацию
+        PathType.ARCHIVE -> extractArchive(
+            archiveFile = path,
+            extractDir = pathToExtractArchive!!,
+            checkerFileNameForExtract = { isXmlFile(it, setOf("xml")) },
+        )
     }
 
     fun removeArchive() {

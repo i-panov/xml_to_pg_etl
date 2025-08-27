@@ -245,6 +245,11 @@ private fun parseXmlDeclarationEncoding(headerText: String): Charset? {
     }
 }
 
+fun isXmlFile(fileName: String, extensions: Set<String> = setOf("xml")): Boolean {
+    val ext = fileName.substringAfterLast('.', "").lowercase()
+    return extensions.any { it.equals(ext, ignoreCase = true) }
+}
+
 /**
  * Удобные константы для часто используемых кодировок
  */

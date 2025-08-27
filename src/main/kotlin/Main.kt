@@ -48,7 +48,7 @@ class XmlState(val path: Path, val extractDir: String?) {
         PathType.ARCHIVE -> extractArchive(
             archiveFile = path,
             extractDir = pathToExtractArchive!!,
-            checkerFileNameForExtract = { isXmlFile(it, setOf("xml")) },
+            checkerFileNameForExtract = { isXmlFile(it) },
         )
     }
 

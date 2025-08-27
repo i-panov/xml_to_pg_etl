@@ -26,15 +26,15 @@ private const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
  *
  * @param archiveFile путь к архиву
  * @param extractDir папка для извлечения
- * @param checkerFileNameForExtract функция для проверки имени файла
  * @param maxFileSizeBytes максимальный размер извлекаемого файла в байтах
+ * @param checkerFileNameForExtract функция для проверки имени файла
  * @return список путей к извлеченным файлам
  */
 fun extractArchive(
     archiveFile: Path,
     extractDir: Path,
+    maxFileSizeBytes: Long = MAX_FILE_SIZE,
     checkerFileNameForExtract: (String) -> Boolean = { true },
-    maxFileSizeBytes: Long = MAX_FILE_SIZE
 ): Sequence<Path> = sequence {
     // TODO: протестировать разархивацию, у меня не сработала на zip архиве.
     // Просто папка создалась пустая и вышло с сообщением что нет файлов.
@@ -263,11 +263,6 @@ private fun streamingCopyWithLimit(source: InputStream, destination: Path, maxBy
 // --------------------------------------------------------------------------------------
 
 private fun sanitizeFileName(fileName: String) = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-
-fun isXmlFile(fileName: String, extensions: Set<String>): Boolean {
-    val ext = fileName.substringAfterLast('.', "").lowercase()
-    return extensions.any { it.equals(ext, ignoreCase = true) }
-}
 
 fun isArchive(path: String): Boolean {
     val lowerPath = path.lowercase()

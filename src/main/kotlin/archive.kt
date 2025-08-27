@@ -11,6 +11,8 @@ import java.nio.file.Path
 import java.util.logging.Logger
 import kotlin.io.path.*
 
+// TODO: Для всех функций хочу в перспективе заменить Sequence на полностью параллельную распаковку
+
 private val logger = Logger.getLogger("ArchiveExtractor")
 
 // Размер буфера для streaming копирования (8KB по умолчанию)
@@ -50,50 +52,36 @@ fun extractArchive(
     val fileName = archiveFile.toString()
     fun fileNameEndsWith(sub: String): Boolean = fileName.endsWith(sub, ignoreCase = true)
 
-    fun extractInternalLocal(format: String) = extractInternal(
+    fun extractInternalLocal(format: String, compressorFormat: String? = null) = extractInternal(
         archiveFile = archiveFile,
         extractDir = extractDir,
         format = format,
         xmlExtensions = xmlFileExtensions,
         maxFileSizeBytes = maxFileSizeBytes,
+        compressorFormat = compressorFormat,
+    )
+
+    fun extractInternalCompressed(suffixToRemove: String, compressorFormat: String) = extractCompressedFile(
+        archiveFile = archiveFile,
+        extractDir = extractDir,
+        xmlExtensions = xmlFileExtensions,
+        maxFileSizeBytes = maxFileSizeBytes,
+        suffixToRemove = suffixToRemove,
+        compressorFormat = compressorFormat
     )
 
     val extractedFiles = when {
         fileNameEndsWith(".zip") -> extractInternalLocal(ArchiveStreamFactory.ZIP)
         fileNameEndsWith(".tar") -> extractInternalLocal(ArchiveStreamFactory.TAR)
         fileNameEndsWith(".7z") -> extractInternalLocal(ArchiveStreamFactory.SEVEN_Z)
-        fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") -> extractInternal(
-            archiveFile = archiveFile,
-            extractDir = extractDir,
-            format = ArchiveStreamFactory.TAR,
-            xmlExtensions = xmlFileExtensions,
-            maxFileSizeBytes = maxFileSizeBytes,
-            compressorFormat = CompressorStreamFactory.GZIP,
+        fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") -> extractInternalLocal(
+            ArchiveStreamFactory.TAR, CompressorStreamFactory.GZIP,
         )
-        fileNameEndsWith(".tar.bz2") || fileNameEndsWith(".tbz2") -> extractInternal(
-            archiveFile = archiveFile,
-            extractDir = extractDir,
-            format = ArchiveStreamFactory.TAR,
-            xmlExtensions = xmlFileExtensions,
-            maxFileSizeBytes = maxFileSizeBytes,
-            compressorFormat = CompressorStreamFactory.BZIP2,
+        fileNameEndsWith(".tar.bz2") || fileNameEndsWith(".tbz2") -> extractInternalLocal(
+            ArchiveStreamFactory.TAR, CompressorStreamFactory.BZIP2,
         )
-        fileNameEndsWith(".gz") -> extractCompressedFile(
-            archiveFile = archiveFile,
-            extractDir = extractDir,
-            xmlExtensions = xmlFileExtensions,
-            maxFileSizeBytes = maxFileSizeBytes,
-            suffixToRemove = ".gz",
-            compressorFormat = CompressorStreamFactory.GZIP
-        )
-        fileNameEndsWith(".bz2") -> extractCompressedFile(
-            archiveFile = archiveFile,
-            extractDir = extractDir,
-            xmlExtensions = xmlFileExtensions,
-            maxFileSizeBytes = maxFileSizeBytes,
-            suffixToRemove = ".bz2",
-            compressorFormat = CompressorStreamFactory.BZIP2
-        )
+        fileNameEndsWith(".gz") -> extractInternalCompressed(".gz", CompressorStreamFactory.GZIP)
+        fileNameEndsWith(".bz2") -> extractInternalCompressed(".bz2", CompressorStreamFactory.BZIP2)
         else -> extractGeneric(
             archiveFile = archiveFile,
             extractDir = extractDir,
@@ -103,15 +91,6 @@ fun extractArchive(
     }
 
     yieldAll(extractedFiles)
-}
-
-fun ArchiveInputStream<out ArchiveEntry>.iterateEntries(): Sequence<ArchiveEntry> = sequence {
-    var entry: ArchiveEntry? = nextEntry
-
-    while (entry != null) {
-        yield(entry)
-        entry = nextEntry
-    }
 }
 
 /**
@@ -148,42 +127,6 @@ private fun extractEntries(
     }
 }
 
-private fun InputStream.toArchiveInputStream(format: String? = null): ArchiveInputStream<ArchiveEntry> {
-    val factory = ArchiveStreamFactory()
-
-    if (format == null) {
-        return factory.createArchiveInputStream(this)
-    }
-
-    return factory.createArchiveInputStream(format, this)
-}
-
-private fun InputStream.toCompressorInputStream(format: String): CompressorInputStream {
-    val compressorFactory = CompressorStreamFactory()
-    return compressorFactory.createCompressorInputStream(format, this)
-}
-
-private fun extractInternal(
-    archiveFile: Path,
-    extractDir: Path,
-    format: String,
-    xmlExtensions: Set<String>,
-    maxFileSizeBytes: Long,
-    compressorFormat: String? = null,
-): Sequence<Path> = archiveFile.inputStream().use { inputStream ->
-    if (compressorFormat != null) {
-        return@use inputStream.toCompressorInputStream(compressorFormat).use { compressedStream ->
-            compressedStream.toArchiveInputStream(format).use { archiveStream ->
-                extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
-            }
-        }
-    }
-
-    inputStream.toArchiveInputStream(format).use { archiveStream ->
-        extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
-    }
-}
-
 private fun extractCompressedFile(
     archiveFile: Path,
     extractDir: Path,
@@ -194,6 +137,7 @@ private fun extractCompressedFile(
 ): Sequence<Path> = sequence {
     archiveFile.inputStream().use { fis ->
         fis.toCompressorInputStream(compressorFormat).use { compressedStream ->
+            // TODO: Похоже на ошибку: зачем удалять расширение перед проверкой расширения?
             val outputFileName = archiveFile.fileName.toString().removeSuffix(suffixToRemove)
 
             if (isXmlFile(outputFileName, xmlExtensions)) {
@@ -210,6 +154,23 @@ private fun extractCompressedFile(
                     throw e
                 }
             }
+        }
+    }
+}
+
+private fun extractInternal(
+    archiveFile: Path,
+    extractDir: Path,
+    format: String,
+    xmlExtensions: Set<String>,
+    maxFileSizeBytes: Long,
+    compressorFormat: String? = null,
+): Sequence<Path> = archiveFile.inputStream().use { inputStream ->
+    val stream = if (compressorFormat != null) inputStream.toCompressorInputStream(compressorFormat) else inputStream
+
+    stream.use {
+        it.toArchiveInputStream(format).use { archiveStream ->
+            extractEntries(archiveStream, extractDir, xmlExtensions, maxFileSizeBytes)
         }
     }
 }
@@ -290,12 +251,16 @@ private fun streamingCopyWithLimit(source: InputStream, destination: Path, maxBy
     }
 }
 
+// --------------------------------------------------------------------------------------
+// HELPERS
+// --------------------------------------------------------------------------------------
+
+private fun sanitizeFileName(fileName: String) = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+
 private fun isXmlFile(fileName: String, extensions: Set<String>): Boolean {
     val ext = fileName.substringAfterLast('.', "").lowercase()
     return extensions.any { it.equals(ext, ignoreCase = true) }
 }
-
-private fun sanitizeFileName(fileName: String) = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
 fun isArchive(path: String): Boolean {
     val lowerPath = path.lowercase()
@@ -308,4 +273,32 @@ fun isArchive(path: String): Boolean {
             lowerPath.endsWith(".gz") ||
             lowerPath.endsWith(".bz2") ||
             lowerPath.endsWith(".7z")
+}
+
+// --------------------------------------------------------------------------------------
+// EXTENSIONS
+// --------------------------------------------------------------------------------------
+
+fun ArchiveInputStream<out ArchiveEntry>.iterateEntries(): Sequence<ArchiveEntry> = sequence {
+    var entry: ArchiveEntry? = nextEntry
+
+    while (entry != null) {
+        yield(entry)
+        entry = nextEntry
+    }
+}
+
+fun InputStream.toArchiveInputStream(format: String = ""): ArchiveInputStream<ArchiveEntry> {
+    val factory = ArchiveStreamFactory()
+
+    return if (format.isBlank()) {
+        factory.createArchiveInputStream(this)
+    } else {
+        factory.createArchiveInputStream(format, this)
+    }
+}
+
+fun InputStream.toCompressorInputStream(format: String): CompressorInputStream {
+    val compressorFactory = CompressorStreamFactory()
+    return compressorFactory.createCompressorInputStream(format, this)
 }

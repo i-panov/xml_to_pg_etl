@@ -3,6 +3,7 @@ package ru.my
 import kotlinx.cli.ArgParser
 import kotlinx.cli.ArgType
 import kotlinx.cli.required
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -16,14 +17,14 @@ import kotlin.io.path.*
 enum class PathType { DIR, ARCHIVE, XML }
 
 @OptIn(ExperimentalPathApi::class)
-class XmlState(val path: Path, val extractDir: String?) {
+class XmlState(private val path: Path, extractDir: String?) {
     init {
         if (!path.exists()) {
             error("XML file, directory, or archive not found: $path")
         }
     }
 
-    val pathType: PathType = when {
+    private val pathType: PathType = when {
         path.isDirectory() -> PathType.DIR
         path.isRegularFile() -> when {
             path.toString().endsWith(".xml", ignoreCase = true) -> PathType.XML
@@ -33,24 +34,25 @@ class XmlState(val path: Path, val extractDir: String?) {
         else -> throw IllegalArgumentException("Unsupported xml path: $path")
     }
 
-    val pathToExtractArchive = when (pathType) {
+    private val pathToExtractArchive = when (pathType) {
         PathType.ARCHIVE -> extractDir?.let {
             Path(it).createDirectories().absolute()
         } ?: createTempDirectory("xml_to_pg_etl_").absolute()
         else -> null
     }
 
-    val xmlFiles: Sequence<Path> = when (pathType) {
-        PathType.DIR -> path.walk().filter {
-            it.extension.equals("xml", true) && it.isRegularFile()
+    val xmlFiles: Flow<Path> = when (pathType) {
+        PathType.DIR -> flow {
+            path.walk().filter { it.extension.equals("xml", true) && it.isRegularFile() }
+                .forEach { emit(it) }
         }
-        PathType.XML -> sequenceOf(path)
+        PathType.XML -> flowOf(path)
         PathType.ARCHIVE -> extractArchive(
             archiveFile = path,
             extractDir = pathToExtractArchive!!,
             checkerFileNameForExtract = { isXmlFile(it) },
         )
-    }
+    }.buffer().flowOn(Dispatchers.IO)
 
     fun removeArchive() {
         if (pathType == PathType.ARCHIVE) {
@@ -114,11 +116,12 @@ fun main(args: Array<String>) {
         config.db.createDataSource().use { db ->
             val processedCount = AtomicInteger(0)
             val errorCount = AtomicInteger(0)
+            val concurrency = Runtime.getRuntime().availableProcessors()
 
-            xmlState.xmlFiles.asFlow().flatMapMerge(concurrency = 4) { xml ->
+            xmlState.xmlFiles.flatMapMerge(concurrency) { xml ->
                 flow {
                     val mapping = mappings.firstOrNull { m ->
-                        Regex(m.xmlFile).matches(xml.fileName.toString())
+                        m.xmlFileRegex.matches(xml.fileName.toString())
                     }
 
                     if (mapping != null) {

@@ -14,6 +14,8 @@ data class MappingTable(
     val batchSize: Int,
     val attributes: Map<String, String> // xml : column
 ) {
+    val xmlFileRegex = Regex(xmlFile)
+
     fun validate(): Map<String, String> {
         val errors = mutableMapOf<String, String>()
 

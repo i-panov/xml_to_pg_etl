@@ -9,9 +9,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.logging.Logger
 import kotlin.io.path.*
 
 enum class PathType { DIR, ARCHIVE, XML }
@@ -24,14 +24,22 @@ class XmlState(private val path: Path, extractDir: String?) {
         }
     }
 
-    private val pathType: PathType = when {
-        path.isDirectory() -> PathType.DIR
-        path.isRegularFile() -> when {
-            path.toString().endsWith(".xml", ignoreCase = true) -> PathType.XML
-            isArchive(path.toString()) -> PathType.ARCHIVE
-            else -> throw IllegalArgumentException("Unsupported xml path: $path")
+    private val pathType = run {
+        if (path.isDirectory()) {
+            return@run PathType.DIR
         }
-        else -> throw IllegalArgumentException("Unsupported xml path: $path")
+
+        if (path.isRegularFile()) {
+            if (path.toString().endsWith(".xml", ignoreCase = true)) {
+                return@run PathType.XML
+            }
+
+            if (isArchive(path.toString())) {
+                return@run PathType.ARCHIVE
+            }
+        }
+
+        throw IllegalArgumentException("Unsupported xml path: $path")
     }
 
     private val pathToExtractArchive = when (pathType) {
@@ -43,8 +51,11 @@ class XmlState(private val path: Path, extractDir: String?) {
 
     val xmlFiles: Flow<Path> = when (pathType) {
         PathType.DIR -> flow {
-            path.walk().filter { it.extension.equals("xml", true) && it.isRegularFile() }
-                .forEach { emit(it) }
+            for (file in path.walk()) {
+                if (file.extension.equals("xml", true) && file.isRegularFile()) {
+                    emit(file)
+                }
+            }
         }
         PathType.XML -> flowOf(path)
         PathType.ARCHIVE -> extractArchive(
@@ -69,7 +80,7 @@ class XmlState(private val path: Path, extractDir: String?) {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 fun main(args: Array<String>) {
-    val logger = Logger.getLogger("Main")
+    val logger = LoggerFactory.getLogger("Main")
     val parser = ArgParser("XML_TO_PG_ETL")
 
     val envPath by parser.option(ArgType.String,
@@ -101,7 +112,7 @@ fun main(args: Array<String>) {
     val hasMappingErrors = mappings.any { mapping ->
         val errors = mapping.validate()
         errors.forEach { (key, value) ->
-            logger.severe("$key: $value")
+            logger.error("$key: $value")
         }
         errors.isNotEmpty()
     }
@@ -141,16 +152,15 @@ fun main(args: Array<String>) {
                             // Producer - парсит XML и готовит batch'и
                             val producerJob = launch {
                                 try {
-                                    parseXmlElements(xml, mapping.xmlTag)
-                                        .chunked(mapping.batchSize)
-                                        .forEach { batch ->
-                                            val mappedBatch = batch.map { item ->
-                                                mapping.attributes.entries.mapNotNull { (tag, col) ->
-                                                    item[tag]?.let { value -> col to value }
-                                                }.toMap()
-                                            }
-                                            batchChannel.send(mappedBatch)
+                                    for (batch in parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize)) {
+                                        val mappedBatch = batch.map { item ->
+                                            mapping.attributes.entries.mapNotNull { (tag, col) ->
+                                                item[tag]?.let { value -> col to value }
+                                            }.toMap()
                                         }
+
+                                        batchChannel.send(mappedBatch)
+                                    }
                                 } finally {
                                     batchChannel.close()
                                 }
@@ -170,21 +180,21 @@ fun main(args: Array<String>) {
                             emit(xml)
                         } catch (e: Exception) {
                             errorCount.incrementAndGet()
-                            logger.severe("Failed to process ${xml.fileName}: ${e.message}")
+                            logger.error("Failed to process ${xml.fileName}: ${e.message}")
                             throw e // перебросим для обработки ниже
                         }
                     } else {
-                        logger.warning("No mapping found for ${xml.fileName}")
+                        logger.warn("No mapping found for ${xml.fileName}")
                     }
                 }
             }.catch { e ->
                 // Логируем ошибку, но продолжаем обработку других файлов
-                logger.severe("Error in flow: ${e.message}")
+                logger.error("Error in flow: ${e.message}")
             }.collect()
 
             val totalFiles = processedCount.get() + errorCount.get()
             if (totalFiles == 0) {
-                logger.warning("No XML files found to process")
+                logger.warn("No XML files found to process")
             } else {
                 logger.info("Processing complete: $totalFiles files found, ${processedCount.get()} processed successfully, ${errorCount.get()} with errors")
             }

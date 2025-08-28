@@ -1,9 +1,9 @@
 package ru.my
 
 import com.zaxxer.hikari.HikariDataSource
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Path
-import java.util.logging.Logger
 import kotlin.io.path.exists
 import kotlin.io.path.readLines
 
@@ -48,7 +48,7 @@ data class AppConfig(
     }
 }
 
-private val logger = Logger.getLogger("AppConfigLoader")
+private val logger = LoggerFactory.getLogger("AppConfigLoader")
 
 fun parseEnvFile(path: Path): Map<String, String> {
     if (!path.exists()) {
@@ -61,7 +61,7 @@ fun parseEnvFile(path: Path): Map<String, String> {
             when {
                 trimmed.isEmpty() || trimmed.startsWith("#") -> null
                 "=" !in trimmed -> {
-                    logger.warning("Warning: Invalid format at line ${index + 1}: $line")
+                    logger.warn("Warning: Invalid format at line ${index + 1}: $line")
                     null
                 }
                 else -> {

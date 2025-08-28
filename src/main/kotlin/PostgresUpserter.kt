@@ -91,7 +91,7 @@ class PostgresUpserter(
                                 )
                             }
                         }
-                        stmt.executeUpdate()
+                        stmt.execute()
                     }
                 }
             }

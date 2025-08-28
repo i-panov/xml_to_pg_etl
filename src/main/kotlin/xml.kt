@@ -1,12 +1,12 @@
 package ru.my
 
+import org.slf4j.LoggerFactory
 import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
-import java.util.logging.Logger
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.XMLStreamConstants.END_ELEMENT
 import javax.xml.stream.XMLStreamConstants.START_ELEMENT
@@ -15,11 +15,11 @@ import kotlin.io.path.exists
 import kotlin.io.path.inputStream
 import kotlin.io.path.name
 
-private val logger = Logger.getLogger("XmlParser")
+private val logger = LoggerFactory.getLogger("XmlParser")
 
 fun parseXmlElements(file: Path, tag: String, encoding: Charset? = null): Sequence<Map<String, String>> = sequence {
     if (!file.exists()) {
-        logger.warning("File ${file.name} not found")
+        logger.warn("File ${file.name} not found")
         return@sequence
     }
 
@@ -96,13 +96,13 @@ private fun parseXmlElementsWithEncoding(
         logger.info("Completed parsing ${file.name}: $processedCount records")
 
     } catch (e: Exception) {
-        logger.severe("Error parsing file ${file.name}: ${e.message}")
+        logger.error("Error parsing file ${file.name}: ${e.message}")
         throw e
     } finally {
         try {
             xmlReader?.close()
         } catch (e: Exception) {
-            logger.warning("Error closing XML stream: ${e.message}")
+            logger.warn("Error closing XML stream: ${e.message}")
         }
     }
 }
@@ -126,13 +126,13 @@ fun detectXmlEncoding(file: Path): EncodingInfo {
             val bytesRead = inputStream.read(bomBuffer)
 
             if (bytesRead <= 0) {
-                logger.warning("Empty file ${file.name}, using UTF-8")
+                logger.warn("Empty file ${file.name}, using UTF-8")
                 return EncodingInfo(StandardCharsets.UTF_8, 0)
             }
 
             // Проверяем BOM на первых считанных байтах
             detectBOM(bomBuffer, bytesRead)?.let { charset ->
-                logger.fine("Detected BOM encoding: ${charset.name()}")
+                logger.info("Detected BOM encoding: ${charset.name()}")
                 // Определяем размер BOM вручную
                 val bomSize = when (charset) {
                     StandardCharsets.UTF_8 -> 3
@@ -158,7 +158,7 @@ fun detectXmlEncoding(file: Path): EncodingInfo {
             return EncodingInfo(encoding, 0)
         }
     } catch (e: Exception) {
-        logger.warning("Failed to detect encoding for ${file.name}: ${e.message}, using UTF-8")
+        logger.warn("Failed to detect encoding for ${file.name}: ${e.message}, using UTF-8")
         return EncodingInfo(StandardCharsets.UTF_8, 0)
     }
 }
@@ -231,16 +231,16 @@ private fun parseXmlDeclarationEncoding(headerText: String): Charset? {
         val matchResult = encodingRegex.find(xmlDeclaration) ?: return null
 
         val encodingName = matchResult.groupValues[1]
-        logger.fine("Found encoding declaration: $encodingName")
+        logger.info("Found encoding declaration: $encodingName")
 
         return try {
             Charset.forName(encodingName.trim())
         } catch (e: Exception) {
-            logger.warning("Unsupported encoding '$encodingName' in XML declaration")
+            logger.warn("Unsupported encoding '$encodingName' in XML declaration")
             null
         }
     } catch (e: Exception) {
-        logger.fine("Error parsing XML declaration: ${e.message}")
+        logger.info("Error parsing XML declaration: ${e.message}")
         return null
     }
 }

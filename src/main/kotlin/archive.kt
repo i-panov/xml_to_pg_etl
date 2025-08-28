@@ -9,10 +9,10 @@ import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.compressors.CompressorInputStream
 import org.apache.commons.compress.compressors.CompressorStreamFactory
+import org.slf4j.LoggerFactory
 import java.io.Closeable
 import java.io.InputStream
 import java.nio.file.Path
-import java.util.logging.Logger
 import kotlin.io.path.*
 
 const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
@@ -33,7 +33,7 @@ fun extractArchive(
 
     extractDir.createDirectories()
 
-    val logger = Logger.getLogger("ArchiveExtractor")
+    val logger = LoggerFactory.getLogger("ArchiveExtractor")
 
     fun fileNameEndsWith(sub: String): Boolean = archiveFile.toString().endsWith(sub, ignoreCase = true)
 
@@ -49,7 +49,7 @@ fun extractArchive(
             }
 
             if (entry.size != -1L && entry.size > maxFileSizeBytes) {
-                logger.warning("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
+                logger.warn("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
                 continue
             }
 
@@ -63,11 +63,11 @@ fun extractArchive(
                     archiveStream.copyToLimited(outputFile, maxFileSizeBytes)
                 }
 
-                logger.fine("Copied $totalRead bytes to ${outputFile.fileName}")
+                logger.info("Copied $totalRead bytes to ${outputFile.fileName}")
                 yield(outputFile)
                 logger.info("Extracted: ${entry.name} (${entry.size} bytes)")
             } catch (e: Exception) {
-                logger.severe("Failed to extract ${entry.name}: ${e.message}")
+                logger.error("Failed to extract ${entry.name}: ${e.message}")
                 outputFile.deleteIfExists()
                 throw e
             }
@@ -102,11 +102,11 @@ fun extractArchive(
 
             try {
                 val totalRead = compressedStream.copyToLimited(outputFile, maxFileSizeBytes)
-                logger.fine("Copied $totalRead bytes to ${outputFile.fileName}")
+                logger.info("Copied $totalRead bytes to ${outputFile.fileName}")
                 yield(outputFile)
                 logger.info("Extracted: $outputFileName")
             } catch (e: Exception) {
-                logger.severe("Failed to extract $outputFileName: ${e.message}")
+                logger.error("Failed to extract $outputFileName: ${e.message}")
                 outputFile.deleteIfExists()
                 throw e
             }
@@ -135,7 +135,7 @@ fun extractArchive(
                         closeableItems.add(archiveStream)
                         extractEntries(archiveStream)
                     } catch (e: Exception) {
-                        logger.severe("Failed to extract archive ${archiveFile.fileName}: ${e.message}")
+                        logger.error("Failed to extract archive ${archiveFile.fileName}: ${e.message}")
                         throw IllegalArgumentException("Unsupported archive format: ${archiveFile.fileName}", e)
                     }
                 }

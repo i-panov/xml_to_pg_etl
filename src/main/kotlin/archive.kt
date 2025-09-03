@@ -150,7 +150,11 @@ fun extractArchive(
 // HELPERS
 // --------------------------------------------------------------------------------------
 
-private fun sanitizeFileName(fileName: String) = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+private fun sanitizeFileName(fileName: String): String {
+    //fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+    // TODO: функция оказалась слишком строгой и убивала сами пути. Позже решу что с ней делать.
+    return fileName
+}
 
 private val ARCHIVE_EXTENSIONS = setOf(".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".gz", ".bz2", ".7z")
 

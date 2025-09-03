@@ -17,7 +17,7 @@ import kotlin.io.path.*
 enum class PathType { DIR, ARCHIVE, XML }
 
 @OptIn(ExperimentalPathApi::class)
-class XmlState(private val path: Path, extractDir: String?) {
+class XmlState(private val path: Path, extractDir: String?, private val fileMasks: Set<Regex> = emptySet()) {
     init {
         if (!path.exists()) {
             error("XML file, directory, or archive not found: $path")
@@ -61,7 +61,15 @@ class XmlState(private val path: Path, extractDir: String?) {
         PathType.ARCHIVE -> extractArchive(
             archiveFile = path,
             extractDir = pathToExtractArchive!!,
-            checkerFileNameForExtract = { isXmlFile(it) },
+            checkerFileNameForExtract = { f ->
+                val b = Path(f).fileName.toString()
+
+                if (fileMasks.isEmpty()) {
+                    isXmlFile(b)
+                } else {
+                    fileMasks.any { it.matches(b) }
+                }
+            },
         )
     }.buffer().flowOn(Dispatchers.IO)
 
@@ -121,7 +129,7 @@ fun main(args: Array<String>) {
         error("Has mapping errors")
     }
 
-    val xmlState = XmlState(Path(xmlPath), extractDir)
+    val xmlState = XmlState(Path(xmlPath), extractDir, mappings.map { it.xmlFileRegex }.toSet())
 
     runBlocking {
         config.db.createDataSource().use { db ->

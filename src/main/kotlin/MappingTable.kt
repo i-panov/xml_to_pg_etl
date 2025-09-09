@@ -12,7 +12,8 @@ data class MappingTable(
     val schema: String?,
     val uniqueColumns: Set<String>,
     val batchSize: Int,
-    val attributes: Map<String, String> // xml : column
+    val attributes: Map<String, String>, // xml : column
+    val enumValues: Map<String, Set<String>>, // tagName : values
 ) {
     val xmlFileRegex = Regex(xmlFile)
 
@@ -55,6 +56,12 @@ data class MappingTable(
             if (col.length > 63) {
                 errors["column.length"] = "Column name '$col' too long (max 63 characters)"
             }
+        }
+
+        val emptyEnumKeys = enumValues.mapNotNull { (k, v) -> if (v.isEmpty()) k else null }
+
+        if (emptyEnumKeys.isNotEmpty()) {
+            errors["enumValues.empty"] = "some enum keys have no values: ${emptyEnumKeys.joinToString()}"
         }
 
         return errors

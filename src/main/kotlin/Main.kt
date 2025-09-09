@@ -160,7 +160,13 @@ fun main(args: Array<String>) {
                             // Producer - парсит XML и готовит batch'и
                             val producerJob = launch {
                                 try {
-                                    for (batch in parseXmlElements(xml, mapping.xmlTag).chunked(mapping.batchSize)) {
+                                    val items = parseXmlElements(
+                                        file = xml,
+                                        tag = mapping.xmlTag,
+                                        enumValues = mapping.enumValues,
+                                    ).chunked(mapping.batchSize)
+
+                                    for (batch in items) {
                                         val mappedBatch = batch.map { item ->
                                             mapping.attributes.entries.mapNotNull { (tag, col) ->
                                                 item[tag]?.let { value -> col to value }

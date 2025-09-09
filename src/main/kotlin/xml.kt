@@ -17,24 +17,37 @@ import kotlin.io.path.name
 
 private val logger = LoggerFactory.getLogger("XmlParser")
 
-fun parseXmlElements(file: Path, tag: String, encoding: Charset? = null): Sequence<Map<String, String>> = sequence {
+fun parseXmlElements(
+    file: Path,
+    tag: String,
+    enumValues: Map<String, Set<String>> = emptyMap(),
+    encoding: Charset? = null,
+): Sequence<Map<String, String>> = sequence {
     if (!file.exists()) {
         logger.warn("File ${file.name} not found")
         return@sequence
     }
 
-    if (encoding != null) {
-        yieldAll(parseXmlElementsWithEncoding(file, tag, EncodingInfo(encoding)))
+    val encodingInfo = if (encoding != null) {
+        EncodingInfo(encoding)
     } else {
         val detectedEncoding = detectXmlEncoding(file)
         logger.info("Detected encoding for ${file.name}: $detectedEncoding")
-        yieldAll(parseXmlElementsWithEncoding(file, tag, detectedEncoding))
+        detectedEncoding
     }
+
+    yieldAll(parseXmlElementsWithEncoding(
+        file = file,
+        tag = tag,
+        enumValues = enumValues,
+        encodingInfo = encodingInfo,
+    ))
 }
 
 private fun parseXmlElementsWithEncoding(
     file: Path,
     tag: String,
+    enumValues: Map<String, Set<String>> = emptyMap(),
     encodingInfo: EncodingInfo
 ): Sequence<Map<String, String>> = sequence {
     val xmlInputFactory = XMLInputFactory.newInstance().apply {
@@ -70,11 +83,18 @@ private fun parseXmlElementsWithEncoding(
                     }
 
                     if (attributes.isNotEmpty()) {
-                        yield(attributes)
-                        processedCount++
+                        val canHandle = enumValues.isEmpty() || enumValues
+                            .map { (k, _) -> k to attributes[k] }
+                            .filter { (_, v) -> v != null }
+                            .all { (k, v) -> enumValues[k]!!.contains(v!!) }
 
-                        if (processedCount % 10000 == 0) {
-                            logger.info("Processed $processedCount records from ${file.name}")
+                        if (canHandle) {
+                            yield(attributes)
+                            processedCount++
+
+                            if (processedCount % 10000 == 0) {
+                                logger.info("Processed $processedCount records from ${file.name}")
+                            }
                         }
                     }
 

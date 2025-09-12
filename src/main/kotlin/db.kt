@@ -77,7 +77,7 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
             return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         }
 
-        fun parseBoolean(value: String): Boolean = sequenceOf("1", "true").contains(value);
+        fun parseBoolean(value: String): Boolean = sequenceOf("1", "true").contains(value.lowercase())
 
         when (col.type) {
             Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
@@ -86,36 +86,117 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.BIT, Types.BOOLEAN -> setBoolean(index, parseBoolean(value))
 
-            Types.TINYINT -> setByte(index, value.toByte())
-            Types.SMALLINT -> setShort(index, value.toShort())
-            Types.INTEGER -> setInt(index, value.toInt())
-            Types.BIGINT -> setLong(index, value.toLong())
-
-            Types.FLOAT, Types.REAL -> setFloat(index, value.toFloat())
-            Types.DOUBLE -> setDouble(index, value.toDouble())
-
-            Types.NUMERIC, Types.DECIMAL -> setBigDecimal(index, BigDecimal(value))
-
-            Types.DATE -> setDate(index, Date.valueOf(value))
-            Types.TIME -> setTime(index, Time.valueOf(value))
-
-            Types.TIMESTAMP -> {
-                val timestampValue = if (value.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
-                    "$value 00:00:00" // Для Timestamp.valueOf важно чтобы время было указано
-                } else {
-                    value
+            Types.TINYINT -> {
+                try {
+                    setByte(index, value.toByte())
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to TINYINT for column '${col.name}'", e)
                 }
-                setTimestamp(index, Timestamp.valueOf(timestampValue))
             }
 
-            Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> setBytes(index, hexToBytes(value))
+            Types.SMALLINT -> {
+                try {
+                    setShort(index, value.toShort())
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to SMALLINT for column '${col.name}'", e)
+                }
+            }
+
+            Types.INTEGER -> {
+                try {
+                    setInt(index, value.toInt())
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to INTEGER for column '${col.name}'", e)
+                }
+            }
+
+            Types.BIGINT -> {
+                try {
+                    setLong(index, value.toLong())
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to BIGINT for column '${col.name}'", e)
+                }
+            }
+
+            Types.FLOAT, Types.REAL -> {
+                try {
+                    setFloat(index, value.toFloat())
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to FLOAT for column '${col.name}'", e)
+                }
+            }
+
+            Types.DOUBLE -> {
+                try {
+                    setDouble(index, value.toDouble())
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to DOUBLE for column '${col.name}'", e)
+                }
+            }
+
+            Types.NUMERIC, Types.DECIMAL -> {
+                try {
+                    setBigDecimal(index, BigDecimal(value))
+                } catch (e: NumberFormatException) {
+                    throw IllegalArgumentException("Cannot convert '$value' to DECIMAL for column '${col.name}'", e)
+                }
+            }
+
+            Types.DATE -> {
+                try {
+                    setDate(index, Date.valueOf(value))
+                } catch (e: IllegalArgumentException) {
+                    throw IllegalArgumentException(
+                        "Cannot convert '$value' to DATE for column '${col.name}'. Expected format: YYYY-MM-DD",
+                        e
+                    )
+                }
+            }
+
+            Types.TIME -> {
+                try {
+                    setTime(index, Time.valueOf(value))
+                } catch (e: IllegalArgumentException) {
+                    throw IllegalArgumentException(
+                        "Cannot convert '$value' to TIME for column '${col.name}'. Expected format: HH:mm:ss",
+                        e
+                    )
+                }
+            }
+
+            Types.TIMESTAMP -> {
+                try {
+                    val timestampValue = if (value.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+                        "$value 00:00:00" // Для Timestamp.valueOf важно чтобы время было указано
+                    } else {
+                        value
+                    }
+                    setTimestamp(index, Timestamp.valueOf(timestampValue))
+                } catch (e: IllegalArgumentException) {
+                    throw IllegalArgumentException(
+                        "Cannot convert '$value' to TIMESTAMP for column '${col.name}'. Expected format: YYYY-MM-DD HH:mm:ss",
+                        e
+                    )
+                }
+            }
+
+            Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> {
+                try {
+                    setBytes(index, hexToBytes(value))
+                } catch (e: Exception) {
+                    throw IllegalArgumentException(
+                        "Cannot convert '$value' to BINARY for column '${col.name}'. Expected hex string",
+                        e
+                    )
+                }
+            }
 
             Types.OTHER, Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
             Types.ARRAY, Types.REF, Types.DATALINK, Types.SQLXML,
             Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE, Types.TIMESTAMP_WITH_TIMEZONE ->
-                throw UnsupportedOperationException("Type ${col.type} not supported")
+                throw UnsupportedOperationException("Type ${col.type} not supported for column '${col.name}'")
 
-            else -> throw IllegalArgumentException("Unknown type: ${col.type}")
+            else -> throw IllegalArgumentException("Unknown type: ${col.type} for column '${col.name}'")
         }
     }
 }

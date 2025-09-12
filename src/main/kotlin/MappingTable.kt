@@ -10,10 +10,10 @@ data class MappingTable(
     val xmlTag: String,
     val table: String,
     val schema: String?,
-    val uniqueColumns: Set<String>,
-    val batchSize: Int,
-    val attributes: Map<String, String>, // xml : column
-    val enumValues: Map<String, Set<String>>, // tagName : values
+    val uniqueColumns: Set<String> = emptySet(),
+    val batchSize: Int = 500,
+    val attributes: Map<String, String> = emptyMap(), // xml : column
+    val enumValues: Map<String, Set<String>> = emptyMap(), // tagName : values
 ) {
     val xmlFileRegex = Regex(xmlFile)
 

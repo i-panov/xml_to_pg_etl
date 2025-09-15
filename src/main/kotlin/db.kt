@@ -19,7 +19,6 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         maxLifetime = 1_800_000
         validationTimeout = 3_000
         leakDetectionThreshold = 60_000
-        isAutoCommit = false
     }
     return HikariDataSource(config)
 }

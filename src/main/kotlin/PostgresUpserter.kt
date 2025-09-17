@@ -35,12 +35,17 @@ class PostgresUpserter(
     }
 
     fun execute(items: List<Map<String, String>>) {
-        if (items.isEmpty()) return
-
-        if (items.size > 1_000_000) {
-            throw IllegalArgumentException("Items batch is too large: ${items.size}")
+        if (items.isEmpty()) {
+            return
         }
 
+        // Эта проверка больше не нужна, так как мы не ограничены количеством параметров,
+        // но оставим ее как защиту от передачи абсурдно больших списков в память.
+        if (items.size > 1_000_000) {
+            throw IllegalArgumentException("Items batch is too large to process in memory: ${items.size}")
+        }
+
+        // Нормализуем ключи в нижний регистр для консистентности
         val itemsNormalized = items.map { item ->
             item.entries.associate { (k, v) -> k.lowercase() to v }
         }
@@ -56,8 +61,7 @@ class PostgresUpserter(
         }
 
         val quotedWorkingColumns = workingColumns.map { quoteIdent(it.name) }
-        val placeholdersForRow = "(" + workingColumns.joinToString(", ") { "?" } + ")"
-        val valuesPlaceholders = List(items.size) { placeholdersForRow }.joinToString(", ")
+        val placeholdersForRow = workingColumns.joinToString(", ") { "?" }
 
         // Формируем SET часть только для не-уникальных колонок, которые есть в данных
         val updateSet = workingColumns
@@ -67,8 +71,7 @@ class PostgresUpserter(
         val sql = buildString {
             append("INSERT INTO $fullyQualifiedTarget (")
             append(quotedWorkingColumns.joinToString(", "))
-            append(") VALUES ")
-            append(valuesPlaceholders)
+            append(") VALUES ($placeholdersForRow)")
             append(" ON CONFLICT ($conflictTarget) ")
             if (updateSet.isNotEmpty()) {
                 append("DO UPDATE SET $updateSet")
@@ -78,21 +81,21 @@ class PostgresUpserter(
         }
 
         dataSource.connection.use { conn ->
-            conn.apply {
-                prepareStatement(sql).use { stmt ->
-                    withTransaction {
-                        itemsNormalized.withIndex().forEach { (itemIndex, item) ->
-                            workingColumns.withIndex().forEach { (colIndex, col) ->
-                                stmt.setParameter(
-                                    // PreparedStatement параметры нумеруются с 1
-                                    index = itemIndex * workingColumns.size + colIndex + 1,
-                                    col = col,
-                                    value = item[col.name.lowercase()]
-                                )
-                            }
+            conn.withTransaction {
+                conn.prepareStatement(sql).use { stmt ->
+                    for (item in itemsNormalized) {
+                        workingColumns.withIndex().forEach { (colIndex, col) ->
+                            stmt.setParameter(
+                                index = colIndex + 1, // PreparedStatement параметры нумеруются с 1
+                                col = col,
+                                value = item[col.name.lowercase()]
+                            )
                         }
-                        stmt.execute()
+
+                        stmt.addBatch()
                     }
+
+                    stmt.executeBatch()
                 }
             }
         }

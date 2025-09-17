@@ -1,5 +1,6 @@
 package ru.my
 
+import com.fasterxml.jackson.annotation.JsonUnwrapped
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -8,8 +9,10 @@ import java.io.File
 data class MappingTable(
     val xmlFile: String,
     val xmlTags: List<String>,
-    val table: String,
-    val schema: String?,
+
+    @JsonUnwrapped
+    val table: TableIdentifier,
+
     val uniqueColumns: Set<String> = emptySet(),
     val batchSize: Int = 500,
     val attributes: Map<String, String> = emptyMap(), // xml : column
@@ -23,13 +26,13 @@ data class MappingTable(
         if (xmlFile.isBlank()) errors["xmlFile"] = "xmlFile is blank"
         if (xmlTags.isEmpty()) errors["xmlTags"] = "xmlTags is blank"
 
-        if (table.isBlank()) errors["table"] = "table name is blank"
-        if (table.length > 63) { // PostgreSQL limit
+        if (table.name.isBlank()) errors["table.name"] = "table name is blank"
+        if (table.name.length > 63) { // PostgreSQL limit
             errors["table.length"] = "Table name too long (max 63 characters)"
         }
 
         val validNamePattern = "^[a-z_][a-z0-9_$]*$".toRegex(RegexOption.IGNORE_CASE)
-        if (!validNamePattern.matches(table)) {
+        if (!validNamePattern.matches(table.name)) {
             errors["table"] = "Invalid characters"
         }
 

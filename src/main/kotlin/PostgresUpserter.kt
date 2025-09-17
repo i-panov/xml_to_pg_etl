@@ -4,18 +4,15 @@ import javax.sql.DataSource
 
 class PostgresUpserter(
     val dataSource: DataSource,
-    val table: String,
-    val schema: String? = null,
+    val table: TableIdentifier,
     val uniqueColumns: Set<String>,
 ) {
-    private val quotedTable = quoteIdent(table.lowercase())
-    private val quotedSchema = if (schema != null) quoteIdent(schema.lowercase()) else null
-    private val fullyQualifiedTarget = if (quotedSchema != null) "${quotedSchema}.${quotedTable}" else quotedTable
+    private val fullyQualifiedTarget = table.buildFullyQualifiedName { quoteIdent(it) }
     private val conflictTarget = uniqueColumns.joinToString(", ") { quoteIdent(it) }
 
     private val allTableColumns = run {
         dataSource.connection.use {
-            it.metaData.getColumnsInfo(table, schema)
+            it.metaData.getColumnsInfo(table)
         }
     }
 

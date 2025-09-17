@@ -1,5 +1,6 @@
 package ru.my
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import java.math.BigDecimal
@@ -24,6 +25,22 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     return HikariDataSource(config)
 }
 
+data class TableIdentifier(
+    @get:JsonProperty("table")
+    val name: String,
+
+    @get:JsonProperty("schema")
+    val schema: String = "",
+) {
+    fun buildFullyQualifiedName(mapper: (String) -> String): String {
+        return if (schema.isEmpty()) {
+            mapper(name)
+        } else {
+            mapper(schema) + "." + mapper(name)
+        }
+    }
+}
+
 data class ColumnInfo(
     val name: String,
     val type: Int,
@@ -46,11 +63,11 @@ fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> = sequence {
     }
 }
 
-private val columnsCache = ConcurrentHashMap<Pair<String?, String>, List<ColumnInfo>>()
+private val columnsCache = ConcurrentHashMap<TableIdentifier, List<ColumnInfo>>()
 
-fun DatabaseMetaData.getColumnsInfo(table: String, schema: String? = null): List<ColumnInfo> {
-    return columnsCache.getOrPut(schema to table) {
-        getColumns(null, schema, table, null).use { it.map(::ColumnInfo).toList() }
+fun DatabaseMetaData.getColumnsInfo(table: TableIdentifier): List<ColumnInfo> {
+    return columnsCache.getOrPut(table) {
+        getColumns(null, table.schema, table.name, null).use { it.map(::ColumnInfo).toList() }
     }
 }
 

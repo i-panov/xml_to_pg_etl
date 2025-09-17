@@ -148,7 +148,6 @@ fun main(args: Array<String>) {
                             val upserter = PostgresUpserter(
                                 dataSource = db,
                                 table = mapping.table,
-                                schema = mapping.schema,
                                 uniqueColumns = mapping.uniqueColumns,
                             )
 

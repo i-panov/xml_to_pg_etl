@@ -5,10 +5,9 @@ import kotlinx.cli.ArgType
 import kotlinx.cli.required
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
@@ -153,40 +152,28 @@ fun main(args: Array<String>) {
 
                             var batchCount = 0
 
-                            // Pipeline: парсинг и вставка в параллельных корутинах
-                            val batchChannel = Channel<List<Map<String, String>>>(capacity = 2)
-
-                            // Producer - парсит XML и готовит batch'и
-                            val producerJob = launch {
-                                try {
-                                    val items = parseXmlElements(
-                                        file = xml,
-                                        tags = mapping.xmlTags,
-                                        enumValues = mapping.enumValues,
-                                    ).chunked(mapping.batchSize)
-
-                                    for (batch in items) {
+                            // Заменяем Channel + launch на Flow + collect
+                            val batchFlow = flow {
+                                parseXmlElements(
+                                    file = xml,
+                                    tags = mapping.xmlTags,
+                                    enumValues = mapping.enumValues,
+                                ).chunked(mapping.batchSize).forEach { batch ->
                                         val mappedBatch = batch.map { item ->
                                             mapping.attributes.entries.mapNotNull { (tag, col) ->
                                                 item[tag]?.let { value -> col to value }
                                             }.toMap()
                                         }
-
-                                        batchChannel.send(mappedBatch)
+                                        emit(mappedBatch)
                                     }
-                                } finally {
-                                    batchChannel.close()
-                                }
-                            }
+                            }.flowOn(Dispatchers.IO).buffer(2) // ← парсинг в фоне + буферизация
 
-                            // Consumer - забирает готовые batch'и и вставляет в БД
-                            for (mappedBatch in batchChannel) {
-                                upserter.execute(mappedBatch)
+                            batchFlow.collect { mappedBatch ->
+                                withContext(Dispatchers.IO) { // ← вставка в БД не блокирует CPU-потоки
+                                    upserter.execute(mappedBatch)
+                                }
                                 batchCount++
                             }
-
-                            // Ждем завершения producer'а (на всякий случай)
-                            producerJob.join()
 
                             logger.info("Processed ${xml.fileName}: $batchCount batches")
                             processedCount.incrementAndGet()
@@ -194,14 +181,13 @@ fun main(args: Array<String>) {
                         } catch (e: Exception) {
                             errorCount.incrementAndGet()
                             logger.error("Failed to process ${xml.fileName}: ${e.message}")
-                            throw e // перебросим для обработки ниже
+                            throw e
                         }
                     } else {
                         logger.warn("No mapping found for ${xml.fileName}")
                     }
                 }
             }.catch { e ->
-                // Логируем ошибку, но продолжаем обработку других файлов
                 logger.error("Error in flow: ${e.message}")
             }.collect()
 

@@ -53,6 +53,11 @@ fun extractArchive(
                 continue
             }
 
+            if (entry.size == 0L) {
+                logger.warn("Skipping empty file ${entry.name}")
+                continue
+            }
+
             val outputFile = extractDir.resolve(sanitizeFileName(entry.name))
             outputFile.parent.createDirectories()
 

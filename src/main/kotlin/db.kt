@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import java.math.BigDecimal
 import java.sql.*
+import java.util.concurrent.ConcurrentHashMap
 
 fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     val config = HikariConfig().apply {
@@ -45,8 +46,13 @@ fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> = sequence {
     }
 }
 
-fun DatabaseMetaData.getColumnsInfo(table: String, schema: String? = null): List<ColumnInfo> =
-    getColumns(null, schema, table, null).use { it.map(::ColumnInfo).toList() }
+private val columnsCache = ConcurrentHashMap<Pair<String?, String>, List<ColumnInfo>>()
+
+fun DatabaseMetaData.getColumnsInfo(table: String, schema: String? = null): List<ColumnInfo> {
+    return columnsCache.getOrPut(schema to table) {
+        getColumns(null, schema, table, null).use { it.map(::ColumnInfo).toList() }
+    }
+}
 
 inline fun <T> Connection.withTransaction(block: () -> T): T {
     val prevAutoCommit = autoCommit
@@ -55,7 +61,7 @@ inline fun <T> Connection.withTransaction(block: () -> T): T {
         val result = block()
         commit()
         result
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         rollback()
         throw e
     } finally {

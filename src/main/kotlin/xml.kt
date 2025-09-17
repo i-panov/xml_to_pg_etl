@@ -19,7 +19,7 @@ private val logger = LoggerFactory.getLogger("XmlParser")
 
 fun parseXmlElements(
     file: Path,
-    tag: String,
+    tags: List<String>,
     enumValues: Map<String, Set<String>> = emptyMap(),
     encoding: Charset? = null,
 ): Sequence<Map<String, String>> = sequence {
@@ -38,7 +38,7 @@ fun parseXmlElements(
 
     yieldAll(parseXmlElementsWithEncoding(
         file = file,
-        tag = tag,
+        tags = tags,
         enumValues = enumValues,
         encodingInfo = encodingInfo,
     ))
@@ -46,7 +46,7 @@ fun parseXmlElements(
 
 private fun parseXmlElementsWithEncoding(
     file: Path,
-    tag: String,
+    tags: List<String>,
     enumValues: Map<String, Set<String>> = emptyMap(),
     encodingInfo: EncodingInfo
 ): Sequence<Map<String, String>> = sequence {
@@ -60,6 +60,7 @@ private fun parseXmlElementsWithEncoding(
 
     var processedCount = 0
     var xmlReader: XMLStreamReader? = null
+    val currentPath = mutableListOf<String>()
 
     try {
         file.inputStream().use { inputStream ->
@@ -77,36 +78,41 @@ private fun parseXmlElementsWithEncoding(
             while (xmlReader!!.hasNext()) {
                 val eventType = xmlReader!!.next()
 
-                if (eventType == START_ELEMENT && xmlReader!!.localName == tag) {
-                    val attributes = (0 until xmlReader!!.attributeCount).associate { i ->
-                        xmlReader!!.getAttributeLocalName(i) to (xmlReader!!.getAttributeValue(i)?.trim() ?: "")
-                    }
+                when (eventType) {
+                    START_ELEMENT -> {
+                        val tagName = xmlReader!!.localName
+                        currentPath.add(tagName)
 
-                    if (attributes.isNotEmpty()) {
-                        val canHandle = enumValues.isEmpty() || enumValues
-                            .map { (k, _) -> k to attributes[k] }
-                            .filter { (_, v) -> v != null }
-                            .all { (k, v) -> enumValues[k]!!.contains(v!!) }
+                        // Проверяем только последние N элементов пути (где N = длина tags)
+                        val shouldProcess = tags.isNotEmpty() &&
+                                currentPath.size >= tags.size &&
+                                currentPath.takeLast(tags.size) == tags
 
-                        if (canHandle) {
-                            yield(attributes)
-                            processedCount++
+                        if (shouldProcess) {
+                            val attributes = (0 until xmlReader!!.attributeCount).associate { i ->
+                                xmlReader!!.getAttributeLocalName(i) to (xmlReader!!.getAttributeValue(i)?.trim() ?: "")
+                            }
 
-                            if (processedCount % 10000 == 0) {
-                                logger.info("Processed $processedCount records from ${file.name}")
+                            if (attributes.isNotEmpty()) {
+                                val canHandle = enumValues.isEmpty() || enumValues
+                                    .map { (k, _) -> k to attributes[k] }
+                                    .filter { (_, v) -> v != null }
+                                    .all { (k, v) -> enumValues[k]?.contains(v) == true }
+
+                                if (canHandle) {
+                                    yield(attributes)
+                                    processedCount++
+
+                                    if (processedCount % 10000 == 0) {
+                                        logger.info("Processed $processedCount records (path: ${currentPath.joinToString("/")}) from ${file.name}")
+                                    }
+                                }
                             }
                         }
                     }
-
-                    // Пропускаем содержимое элемента до закрывающего тега
-                    if (xmlReader!!.next() != END_ELEMENT) {
-                        var depth = 1
-                        while (xmlReader!!.hasNext() && depth > 0) {
-                            when (xmlReader!!.next()) {
-                                START_ELEMENT -> depth++
-                                END_ELEMENT -> depth--
-                            }
-                            if (depth == 0 && xmlReader!!.localName == tag) break
+                    END_ELEMENT -> {
+                        if (currentPath.isNotEmpty()) {
+                            currentPath.removeAt(currentPath.size - 1)
                         }
                     }
                 }

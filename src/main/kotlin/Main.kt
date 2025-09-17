@@ -162,7 +162,7 @@ fun main(args: Array<String>) {
                                 try {
                                     val items = parseXmlElements(
                                         file = xml,
-                                        tag = mapping.xmlTag,
+                                        tags = mapping.xmlTags,
                                         enumValues = mapping.enumValues,
                                     ).chunked(mapping.batchSize)
 

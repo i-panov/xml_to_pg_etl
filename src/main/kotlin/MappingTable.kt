@@ -7,7 +7,7 @@ import java.io.File
 
 data class MappingTable(
     val xmlFile: String,
-    val xmlTag: String,
+    val xmlTags: List<String>,
     val table: String,
     val schema: String?,
     val uniqueColumns: Set<String> = emptySet(),
@@ -21,7 +21,7 @@ data class MappingTable(
         val errors = mutableMapOf<String, String>()
 
         if (xmlFile.isBlank()) errors["xmlFile"] = "xmlFile is blank"
-        if (xmlTag.isBlank()) errors["xmlTag"] = "xmlTag is blank"
+        if (xmlTags.isEmpty()) errors["xmlTags"] = "xmlTags is blank"
 
         if (table.isBlank()) errors["table"] = "table name is blank"
         if (table.length > 63) { // PostgreSQL limit

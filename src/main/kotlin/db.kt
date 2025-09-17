@@ -1,11 +1,5 @@
 package ru.my
 
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.databind.DeserializationContext
-import com.fasterxml.jackson.databind.JsonDeserializer
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.ObjectNode
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import java.math.BigDecimal
@@ -30,31 +24,13 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     return HikariDataSource(config)
 }
 
-data class TableIdentifier(
-    @get:JsonProperty("table")
-    val name: String,
-
-    @get:JsonProperty("schema")
-    val schema: String = "",
-) {
+data class TableIdentifier(val name: String, val schema: String = "") {
     fun buildFullyQualifiedName(mapper: (String) -> String): String {
         return if (schema.isEmpty()) {
             mapper(name)
         } else {
             mapper(schema) + "." + mapper(name)
         }
-    }
-}
-
-class TableIdentifierDeserializer : JsonDeserializer<TableIdentifier>() {
-    override fun deserialize(p: JsonParser, ctxt: DeserializationContext): TableIdentifier {
-        val node: JsonNode = p.codec.readTree(p)
-        val parent = node as? ObjectNode ?: throw IllegalArgumentException("Expected JSON object")
-
-        val tableName = parent.get("table")?.asText() ?: ""
-        val schemaName = parent.get("schema")?.takeIf { !it.isNull }?.asText() ?: ""
-
-        return TableIdentifier(tableName, schemaName)
     }
 }
 

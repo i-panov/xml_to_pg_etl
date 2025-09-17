@@ -19,7 +19,7 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         idleTimeout = 600_000
         maxLifetime = 1_800_000
         validationTimeout = 3_000
-        leakDetectionThreshold = 60_000
+        leakDetectionThreshold = 10 * 60 * 1000
     }
     return HikariDataSource(config)
 }

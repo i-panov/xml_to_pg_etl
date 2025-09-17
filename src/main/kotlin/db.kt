@@ -1,6 +1,11 @@
 package ru.my
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.databind.DeserializationContext
+import com.fasterxml.jackson.databind.JsonDeserializer
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import java.math.BigDecimal
@@ -38,6 +43,18 @@ data class TableIdentifier(
         } else {
             mapper(schema) + "." + mapper(name)
         }
+    }
+}
+
+class TableIdentifierDeserializer : JsonDeserializer<TableIdentifier>() {
+    override fun deserialize(p: JsonParser, ctxt: DeserializationContext): TableIdentifier {
+        val node: JsonNode = p.codec.readTree(p)
+        val parent = node as? ObjectNode ?: throw IllegalArgumentException("Expected JSON object")
+
+        val tableName = parent.get("table")?.asText() ?: ""
+        val schemaName = parent.get("schema")?.takeIf { !it.isNull }?.asText() ?: ""
+
+        return TableIdentifier(tableName, schemaName)
     }
 }
 

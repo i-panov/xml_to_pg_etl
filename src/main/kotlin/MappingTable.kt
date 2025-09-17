@@ -1,7 +1,7 @@
 package ru.my
 
-import com.fasterxml.jackson.annotation.JsonUnwrapped
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import java.io.File
@@ -10,7 +10,7 @@ data class MappingTable(
     val xmlFile: String,
     val xmlTags: List<String>,
 
-    @JsonUnwrapped
+    @JsonDeserialize(using = TableIdentifierDeserializer::class)
     val table: TableIdentifier,
 
     val uniqueColumns: Set<String> = emptySet(),

@@ -30,7 +30,6 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         addDataSourceProperty("tcpKeepAlive", "true")
         addDataSourceProperty("reWriteBatchedInserts", "true")
         addDataSourceProperty("options", "-c statement_timeout=300000") // 5 мин
-        addDataSourceProperty("options", "-c max_prepared_transactions=100") // Или больше
     }
     return HikariDataSource(config)
 }

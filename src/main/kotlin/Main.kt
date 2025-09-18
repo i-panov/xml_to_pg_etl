@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
+import kotlin.system.exitProcess
 
 enum class PathType { DIR, ARCHIVE, XML }
 
@@ -125,17 +126,17 @@ fun main(args: Array<String>) {
             val errorCount = AtomicInteger(0)
             val concurrency = Runtime.getRuntime().availableProcessors()
 
-            xmlState.xmlFiles.mapNotNull { xml ->
+            val flow = xmlState.xmlFiles.mapNotNull { xml ->
                 val mapping = mappings.firstOrNull { m ->
                     m.xmlFileRegex.matches(xml.fileName.toString())
                 }
 
                 if (mapping == null) {
                     logger.warn("No mapping found for ${xml.fileName}")
-                    return@mapNotNull null
+                    null
+                } else {
+                    MappingWithFile(xml, mapping)
                 }
-
-                MappingWithFile(xml, mapping)
             }.onCompletion {
                 if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE) {
                     logger.info("All files from archive processed. Removing archive: ${xmlState.path}")
@@ -186,12 +187,20 @@ fun main(args: Array<String>) {
                     } catch (e: Exception) {
                         errorCount.incrementAndGet()
                         logger.error("Failed to process ${xml.fileName}: ${e.message}")
-                        throw e
+
+                        if (config.stopOnError) {
+                            throw RuntimeException("Stop on error flag is set. Terminating due to error in file: ${xml.fileName}", e)
+                        }
                     }
                 }
-            }.catch { e ->
-                logger.error("Error in flow: ${e.message}")
-            }.collect()
+            }
+
+            try {
+                flow.collect()
+            } catch (e: Exception) {
+                logger.error("ETL process was terminated due to an error: ${e.message}")
+                exitProcess(1)
+            }
 
             val totalFiles = processedCount.get() + errorCount.get()
             if (totalFiles == 0) {

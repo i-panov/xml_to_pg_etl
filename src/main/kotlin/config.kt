@@ -31,6 +31,7 @@ data class AppConfig(
     val mappingsFile: String,
     val removeArchivesAfterUnpack: Boolean = false,
     val removeXmlAfterImport: Boolean = false,
+    val stopOnError: Boolean = false,
 ) {
     fun loadMappings(): List<MappingTable> {
         val file = File(mappingsFile)
@@ -92,6 +93,7 @@ fun loadAppConfig(envPath: Path): AppConfig {
         mappingsFile = env["MAPPINGS_FILE"] ?: error("MAPPINGS_FILE is required"),
         removeArchivesAfterUnpack = env["REMOVE_ARCHIVES_AFTER_UNPACK"]?.toBoolean() ?: false,
         removeXmlAfterImport = env["REMOVE_XML_AFTER_IMPORT"]?.toBoolean() ?: false,
+        stopOnError = env["STOP_ON_ERROR"]?.toBoolean() ?: false,
     );
 
     logger.info("Configuration loaded: DB=${db.host}:${db.port}/${db.database}")

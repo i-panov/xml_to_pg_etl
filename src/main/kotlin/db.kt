@@ -26,10 +26,10 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         maxLifetime = 20 * 60 * 1000
         validationTimeout = 5_000
 
-        addDataSourceProperty("socketTimeout", "300") // 5 минут
+        addDataSourceProperty("socketTimeout", "700")
         addDataSourceProperty("tcpKeepAlive", "true")
         addDataSourceProperty("reWriteBatchedInserts", "true")
-        addDataSourceProperty("options", "-c statement_timeout=300000") // 5 мин
+        addDataSourceProperty("options", "-c statement_timeout=600000")
     }
     return HikariDataSource(config)
 }

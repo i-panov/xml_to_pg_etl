@@ -137,8 +137,8 @@ fun main(args: Array<String>) {
                 } else {
                     MappingWithFile(xml, mapping)
                 }
-            }.onCompletion {
-                if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE) {
+            }.onCompletion { cause ->
+                if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE && cause == null) {
                     logger.info("All files from archive processed. Removing archive: ${xmlState.path}")
                     xmlState.path.deleteIfExists()
                 }
@@ -170,7 +170,12 @@ fun main(args: Array<String>) {
 
                         batchFlow.collect { mappedBatch ->
                             withContext(Dispatchers.IO) {
+                                val startTime = System.currentTimeMillis()
                                 upserter.execute(mappedBatch)
+                                val duration = System.currentTimeMillis() - startTime
+                                if (duration > 5000) { // Логируем только долгие батчи
+                                    logger.debug("Batch executed in ${duration}ms (size: ${mappedBatch.size})")
+                                }
                             }
                             batchCount++
                         }

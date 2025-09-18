@@ -15,15 +15,14 @@ import kotlin.io.path.*
 
 enum class PathType { DIR, ARCHIVE, XML }
 
-@OptIn(ExperimentalPathApi::class)
-class XmlState(private val path: Path, extractDir: String?, private val fileMasks: Set<Regex> = emptySet()) {
+class XmlState(val path: Path, extractDir: String?, private val fileMasks: Set<Regex> = emptySet()) {
     init {
         if (!path.exists()) {
             error("XML file, directory, or archive not found: $path")
         }
     }
 
-    private val pathType = run {
+    val pathType = run {
         if (path.isDirectory()) {
             return@run PathType.DIR
         }
@@ -71,18 +70,6 @@ class XmlState(private val path: Path, extractDir: String?, private val fileMask
             },
         )
     }.buffer().flowOn(Dispatchers.IO)
-
-    fun removeArchive() {
-        if (pathType == PathType.ARCHIVE) {
-            path.deleteIfExists()
-        }
-    }
-
-    fun removeXml(): Any = when (pathType) {
-        PathType.DIR -> path.deleteRecursively()
-        PathType.XML -> path.deleteIfExists()
-        PathType.ARCHIVE -> pathToExtractArchive?.deleteRecursively() ?: Unit
-    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -136,7 +123,14 @@ fun main(args: Array<String>) {
             val errorCount = AtomicInteger(0)
             val concurrency = Runtime.getRuntime().availableProcessors()
 
-            xmlState.xmlFiles.flatMapMerge(concurrency) { xml ->
+            val xmlFilesFlow = xmlState.xmlFiles.onCompletion {
+                if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE) {
+                    logger.info("All files from archive processed. Removing archive: ${xmlState.path}")
+                    xmlState.path.deleteIfExists()
+                }
+            }
+
+            xmlFilesFlow.flatMapMerge(concurrency) { xml ->
                 flow {
                     val mapping = mappings.firstOrNull { m ->
                         m.xmlFileRegex.matches(xml.fileName.toString())
@@ -152,30 +146,35 @@ fun main(args: Array<String>) {
 
                             var batchCount = 0
 
-                            // Заменяем Channel + launch на Flow + collect
                             val batchFlow = flow {
                                 parseXmlElements(
                                     file = xml,
                                     tags = mapping.xmlTags,
                                     enumValues = mapping.enumValues,
                                 ).chunked(mapping.batchSize).forEach { batch ->
-                                        val mappedBatch = batch.map { item ->
-                                            mapping.attributes.entries.mapNotNull { (tag, col) ->
-                                                item[tag]?.let { value -> col to value }
-                                            }.toMap()
-                                        }
-                                        emit(mappedBatch)
+                                    val mappedBatch = batch.map { item ->
+                                        mapping.attributes.entries.mapNotNull { (tag, col) ->
+                                            item[tag]?.let { value -> col to value }
+                                        }.toMap()
                                     }
-                            }.flowOn(Dispatchers.IO).buffer(2) // ← парсинг в фоне + буферизация
+                                    emit(mappedBatch)
+                                }
+                            }.flowOn(Dispatchers.IO).buffer(2)
 
                             batchFlow.collect { mappedBatch ->
-                                withContext(Dispatchers.IO) { // ← вставка в БД не блокирует CPU-потоки
+                                withContext(Dispatchers.IO) {
                                     upserter.execute(mappedBatch)
                                 }
                                 batchCount++
                             }
 
                             logger.info("Processed ${xml.fileName}: $batchCount batches")
+
+                            if (config.removeXmlAfterImport) {
+                                logger.info("Removing processed XML: $xml")
+                                xml.deleteIfExists()
+                            }
+
                             processedCount.incrementAndGet()
                             emit(xml)
                         } catch (e: Exception) {
@@ -198,13 +197,5 @@ fun main(args: Array<String>) {
                 logger.info("Processing complete: $totalFiles files found, ${processedCount.get()} processed successfully, ${errorCount.get()} with errors")
             }
         }
-    }
-
-    if (config.removeArchivesAfterUnpack) {
-        xmlState.removeArchive()
-    }
-
-    if (config.removeXmlAfterImport) {
-        xmlState.removeXml()
     }
 }

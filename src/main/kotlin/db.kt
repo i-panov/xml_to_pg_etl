@@ -21,6 +21,10 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         validationTimeout = 3_000
         leakDetectionThreshold = 10 * 60 * 1000
     }
+
+    config.addDataSourceProperty("socketTimeout", "60")
+    config.addDataSourceProperty("tcpKeepAlive", "true")
+    config.addDataSourceProperty("reWriteBatchedInserts", "true")
     return HikariDataSource(config)
 }
 

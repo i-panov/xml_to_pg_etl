@@ -25,7 +25,7 @@ dependencies {
     implementation("com.zaxxer:HikariCP:5.0.1")
 
     // PostgreSQL
-    implementation("org.postgresql:postgresql:42.6.0")
+    implementation("org.postgresql:postgresql:42.7.4")
 
     // Jackson для XML
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.19.0")

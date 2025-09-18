@@ -5,6 +5,8 @@ import com.zaxxer.hikari.HikariDataSource
 import java.math.BigDecimal
 import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.max
+import kotlin.math.min
 
 fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     val config = HikariConfig().apply {
@@ -12,19 +14,24 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         username = dbConfig.user
         password = dbConfig.password
 
-        // Оптимальные настройки для высокой нагрузки
-        maximumPoolSize = Runtime.getRuntime().availableProcessors() * 4
-        minimumIdle = maximumPoolSize / 2
-        connectionTimeout = 30_000
-        idleTimeout = 600_000
-        maxLifetime = 1_800_000
-        validationTimeout = 3_000
-        leakDetectionThreshold = 10 * 60 * 1000
-    }
+        // ОСНОВНАЯ НАСТРОЙКА: уменьшаем пул, но не так радикально
+        // Формула: Ядра * 2, но с жестким ограничением сверху.
+        // Это дает параллелизм, но предотвращает бесконтрольный рост.
+        val suggestedPoolSize = Runtime.getRuntime().availableProcessors() * 2
+        maximumPoolSize = min(suggestedPoolSize, 16) // Не более 16 соединений!
+        minimumIdle = max(2, maximumPoolSize / 4) // Динамический, но скромный
 
-    config.addDataSourceProperty("socketTimeout", "60")
-    config.addDataSourceProperty("tcpKeepAlive", "true")
-    config.addDataSourceProperty("reWriteBatchedInserts", "true")
+        connectionTimeout = 30_000
+        idleTimeout = 2 * 60 * 1000
+        maxLifetime = 20 * 60 * 1000
+        validationTimeout = 5_000
+
+        addDataSourceProperty("socketTimeout", "300") // 5 минут
+        addDataSourceProperty("tcpKeepAlive", "true")
+        addDataSourceProperty("reWriteBatchedInserts", "true")
+        addDataSourceProperty("options", "-c statement_timeout=300000") // 5 мин
+        addDataSourceProperty("options", "-c max_prepared_transactions=100") // Или больше
+    }
     return HikariDataSource(config)
 }
 

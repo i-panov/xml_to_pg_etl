@@ -15,6 +15,8 @@ import kotlin.io.path.*
 
 enum class PathType { DIR, ARCHIVE, XML }
 
+data class MappingWithFile(val xmlFile: Path, val mapping: MappingTable)
+
 class XmlState(val path: Path, extractDir: String?, private val fileMasks: Set<Regex> = emptySet()) {
     init {
         if (!path.exists()) {
@@ -123,67 +125,68 @@ fun main(args: Array<String>) {
             val errorCount = AtomicInteger(0)
             val concurrency = Runtime.getRuntime().availableProcessors()
 
-            val xmlFilesFlow = xmlState.xmlFiles.onCompletion {
+            xmlState.xmlFiles.mapNotNull { xml ->
+                val mapping = mappings.firstOrNull { m ->
+                    m.xmlFileRegex.matches(xml.fileName.toString())
+                }
+
+                if (mapping == null) {
+                    logger.warn("No mapping found for ${xml.fileName}")
+                    return@mapNotNull null
+                }
+
+                MappingWithFile(xml, mapping)
+            }.onCompletion {
                 if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE) {
                     logger.info("All files from archive processed. Removing archive: ${xmlState.path}")
                     xmlState.path.deleteIfExists()
                 }
-            }
-
-            xmlFilesFlow.flatMapMerge(concurrency) { xml ->
+            }.flatMapMerge(concurrency) { (xml, mapping) ->
                 flow {
-                    val mapping = mappings.firstOrNull { m ->
-                        m.xmlFileRegex.matches(xml.fileName.toString())
-                    }
+                    try {
+                        val upserter = PostgresUpserter(
+                            dataSource = db,
+                            table = TableIdentifier(mapping.table, mapping.schema ?: ""),
+                            uniqueColumns = mapping.uniqueColumns,
+                        )
 
-                    if (mapping != null) {
-                        try {
-                            val upserter = PostgresUpserter(
-                                dataSource = db,
-                                table = TableIdentifier(mapping.table, mapping.schema ?: ""),
-                                uniqueColumns = mapping.uniqueColumns,
-                            )
+                        var batchCount = 0
 
-                            var batchCount = 0
-
-                            val batchFlow = flow {
-                                parseXmlElements(
-                                    file = xml,
-                                    tags = mapping.xmlTags,
-                                    enumValues = mapping.enumValues,
-                                ).chunked(mapping.batchSize).forEach { batch ->
-                                    val mappedBatch = batch.map { item ->
-                                        mapping.attributes.entries.mapNotNull { (tag, col) ->
-                                            item[tag]?.let { value -> col to value }
-                                        }.toMap()
-                                    }
-                                    emit(mappedBatch)
+                        val batchFlow = flow {
+                            parseXmlElements(
+                                file = xml,
+                                tags = mapping.xmlTags,
+                                enumValues = mapping.enumValues,
+                            ).chunked(mapping.batchSize).forEach { batch ->
+                                val mappedBatch = batch.map { item ->
+                                    mapping.attributes.entries.mapNotNull { (tag, col) ->
+                                        item[tag]?.let { value -> col to value }
+                                    }.toMap()
                                 }
-                            }.flowOn(Dispatchers.IO).buffer(2)
-
-                            batchFlow.collect { mappedBatch ->
-                                withContext(Dispatchers.IO) {
-                                    upserter.execute(mappedBatch)
-                                }
-                                batchCount++
+                                emit(mappedBatch)
                             }
+                        }.flowOn(Dispatchers.IO).buffer(2)
 
-                            logger.info("Processed ${xml.fileName}: $batchCount batches")
-
-                            if (config.removeXmlAfterImport) {
-                                logger.info("Removing processed XML: $xml")
-                                xml.deleteIfExists()
+                        batchFlow.collect { mappedBatch ->
+                            withContext(Dispatchers.IO) {
+                                upserter.execute(mappedBatch)
                             }
-
-                            processedCount.incrementAndGet()
-                            emit(xml)
-                        } catch (e: Exception) {
-                            errorCount.incrementAndGet()
-                            logger.error("Failed to process ${xml.fileName}: ${e.message}")
-                            throw e
+                            batchCount++
                         }
-                    } else {
-                        logger.warn("No mapping found for ${xml.fileName}")
+
+                        logger.info("Processed ${xml.fileName}: $batchCount batches")
+
+                        if (config.removeXmlAfterImport) {
+                            logger.info("Removing processed XML: $xml")
+                            xml.deleteIfExists()
+                        }
+
+                        processedCount.incrementAndGet()
+                        emit(xml)
+                    } catch (e: Exception) {
+                        errorCount.incrementAndGet()
+                        logger.error("Failed to process ${xml.fileName}: ${e.message}")
+                        throw e
                     }
                 }
             }.catch { e ->

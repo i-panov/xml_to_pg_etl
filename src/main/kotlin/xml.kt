@@ -189,51 +189,25 @@ fun detectXmlEncoding(file: Path): EncodingInfo {
     }
 }
 
+private fun ByteArray.startsWith(prefix: ByteArray) = size >= prefix.size && contentEquals(prefix)
+
+private class BomRule(intBytes: IntArray, val charset: Charset) {
+    val bytes = intBytes.map { it.toByte() }.toByteArray()
+}
+
+private val BOM_RULES = arrayOf(
+    BomRule(intArrayOf(0xEF, 0xBB, 0xBF), StandardCharsets.UTF_8),
+    BomRule(intArrayOf(0xFE, 0xFF), StandardCharsets.UTF_16BE),
+    BomRule(intArrayOf(0xFF, 0xFE), StandardCharsets.UTF_16LE),
+    BomRule(intArrayOf(0x00, 0x00, 0xFE, 0xFF), Charset.forName("UTF-32BE")),
+    BomRule(intArrayOf(0xFF, 0xFE, 0x00, 0x00), Charset.forName("UTF-32LE")),
+)
+
 /**
  * Определяет кодировку по BOM (Byte Order Mark)
  */
 private fun detectBOM(buffer: ByteArray, length: Int): Charset? {
-    // UTF-8 BOM: EF BB BF
-    if (length >= 3 &&
-        buffer[0] == 0xEF.toByte() &&
-        buffer[1] == 0xBB.toByte() &&
-        buffer[2] == 0xBF.toByte()) {
-        return StandardCharsets.UTF_8
-    }
-
-    // UTF-16 BE BOM: FE FF
-    if (length >= 2 &&
-        buffer[0] == 0xFE.toByte() &&
-        buffer[1] == 0xFF.toByte()) {
-        return StandardCharsets.UTF_16BE
-    }
-
-    // UTF-16 LE BOM: FF FE
-    if (length >= 2 &&
-        buffer[0] == 0xFF.toByte() &&
-        buffer[1] == 0xFE.toByte()) {
-        return StandardCharsets.UTF_16LE
-    }
-
-    // UTF-32 BE BOM: 00 00 FE FF
-    if (length >= 4 &&
-        buffer[0] == 0x00.toByte() &&
-        buffer[1] == 0x00.toByte() &&
-        buffer[2] == 0xFE.toByte() &&
-        buffer[3] == 0xFF.toByte()) {
-        return Charset.forName("UTF-32BE")
-    }
-
-    // UTF-32 LE BOM: FF FE 00 00
-    if (length >= 4 &&
-        buffer[0] == 0xFF.toByte() &&
-        buffer[1] == 0xFE.toByte() &&
-        buffer[2] == 0x00.toByte() &&
-        buffer[3] == 0x00.toByte()) {
-        return Charset.forName("UTF-32LE")
-    }
-
-    return null
+    return BOM_RULES.firstOrNull { rule -> length >= rule.bytes.size && buffer.startsWith(rule.bytes) }?.charset
 }
 
 /**

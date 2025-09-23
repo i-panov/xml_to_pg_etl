@@ -15,12 +15,12 @@ import java.io.InputStream
 import java.nio.file.Path
 import kotlin.io.path.*
 
-const val MAX_FILE_SIZE = 1024L * 1024L * 1024L
+const val MAX_ARCHIVE_ITEM_SIZE = 1024L * 1024L * 1024L
 
 fun extractArchive(
     archiveFile: Path,
     extractDir: Path,
-    maxFileSizeBytes: Long = MAX_FILE_SIZE,
+    maxItemSizeBytes: Long = MAX_ARCHIVE_ITEM_SIZE,
     checkerFileNameForExtract: (String) -> Boolean = { true },
 ): Flow<Path> {
     if (!archiveFile.exists()) {
@@ -48,8 +48,8 @@ fun extractArchive(
                 continue
             }
 
-            if (entry.size != -1L && entry.size > maxFileSizeBytes) {
-                logger.warn("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxFileSizeBytes")
+            if (entry.size != -1L && entry.size > maxItemSizeBytes && maxItemSizeBytes > 0L) {
+                logger.warn("Skipping file ${entry.name}: size ${entry.size} exceeds limit $maxItemSizeBytes")
                 continue
             }
 
@@ -65,7 +65,7 @@ fun extractArchive(
                 val totalRead = if (entry.size != -1L) {
                     archiveStream.copyToExact(outputFile, entry.size)
                 } else {
-                    archiveStream.copyToLimited(outputFile, maxFileSizeBytes)
+                    archiveStream.copyToLimited(outputFile, maxItemSizeBytes)
                 }
 
                 logger.info("Copied $totalRead bytes to ${outputFile.fileName}")
@@ -106,7 +106,7 @@ fun extractArchive(
             outputFile.parent.createDirectories()
 
             try {
-                val totalRead = compressedStream.copyToLimited(outputFile, maxFileSizeBytes)
+                val totalRead = compressedStream.copyToLimited(outputFile, maxItemSizeBytes)
                 logger.info("Copied $totalRead bytes to ${outputFile.fileName}")
                 yield(outputFile)
                 logger.info("Extracted: $outputFileName")

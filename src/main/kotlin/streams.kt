@@ -44,22 +44,25 @@ fun InputStream.copyToWithExpectedSize(output: OutputStream, expectedSize: Long)
         }
     )
 
-fun InputStream.copyToWithMaxSize(output: OutputStream, maxSize: Long): Long =
-    copyToWithValidation(
+fun InputStream.copyToWithMaxSize(output: OutputStream, maxSize: Long): Long {
+    val sanitizedMaxSize = if (maxSize > 0L) maxSize else Long.MAX_VALUE
+
+    return copyToWithValidation(
         output = output,
-        limit = maxSize,
+        limit = sanitizedMaxSize,
         onChunk = { totalRead, bytesRead ->
-            if (totalRead + bytesRead > maxSize) {
-                throw IOException("Size limit exceeded: $maxSize")
+            if (totalRead + bytesRead > sanitizedMaxSize) {
+                throw IOException("Size limit exceeded: $sanitizedMaxSize")
             }
         },
         onDone = { totalRead ->
             // Если мы на лимите — проверим, не осталось ли ещё данных
-            if (totalRead == maxSize && read() != -1) {
-                throw IOException("File size exceeds limit of $maxSize bytes")
+            if (totalRead == sanitizedMaxSize && read() != -1) {
+                throw IOException("File size exceeds limit of $sanitizedMaxSize bytes")
             }
         }
     )
+}
 
 private inline fun InputStream.copyToWithValidation(
     output: OutputStream,

@@ -32,6 +32,7 @@ data class AppConfig(
     val removeArchivesAfterUnpack: Boolean = false,
     val removeXmlAfterImport: Boolean = false,
     val stopOnError: Boolean = false,
+    val maxArchiveItemSize: Long = MAX_ARCHIVE_ITEM_SIZE,
 ) {
     fun loadMappings(): List<MappingConfig> {
         val file = File(mappingsFile)
@@ -94,6 +95,7 @@ fun loadAppConfig(envPath: Path): AppConfig {
         removeArchivesAfterUnpack = env["REMOVE_ARCHIVES_AFTER_UNPACK"]?.toBoolean() ?: false,
         removeXmlAfterImport = env["REMOVE_XML_AFTER_IMPORT"]?.toBoolean() ?: false,
         stopOnError = env["STOP_ON_ERROR"]?.toBoolean() ?: false,
+        maxArchiveItemSize = env["MAX_ARCHIVE_ITEM_SIZE"]?.toLongOrNull() ?: MAX_ARCHIVE_ITEM_SIZE,
     )
 
     logger.info("Configuration loaded: DB=${db.host}:${db.port}/${db.database}")

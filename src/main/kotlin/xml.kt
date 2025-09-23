@@ -8,37 +8,76 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import javax.xml.stream.XMLInputFactory
-import javax.xml.stream.XMLStreamConstants.END_ELEMENT
-import javax.xml.stream.XMLStreamConstants.START_ELEMENT
+import javax.xml.stream.XMLStreamConstants.*
 import javax.xml.stream.XMLStreamReader
 import kotlin.io.path.exists
 import kotlin.io.path.inputStream
 import kotlin.io.path.name
+import kotlin.system.measureTimeMillis
 
 private val logger = LoggerFactory.getLogger("XmlParser")
 
+enum class XmlValueType { ATTRIBUTE, CONTENT }
+
+data class XmlValueConfig(
+    val path: List<String>,
+    val valueType: XmlValueType,
+    val required: Boolean = false,
+    val outputKey: String = path.last(),
+) {
+    init {
+        if (path.isEmpty()) {
+            throw IllegalArgumentException("Path must not be empty")
+        }
+
+        if (outputKey.isEmpty()) {
+            throw IllegalArgumentException("Output key must not be empty (path: $path)")
+        }
+    }
+}
+
 fun parseXmlElements(
     file: Path,
-    tags: List<String>,
+    rootPath: List<String>,
+    valueConfigs: Set<XmlValueConfig>,
     enumValues: Map<String, Set<String>> = emptyMap(),
     encoding: Charset? = null,
 ): Sequence<Map<String, String>> = sequence {
+    if (rootPath.isEmpty()) {
+        throw IllegalArgumentException("Root path must not be empty")
+    }
+
+    if (valueConfigs.isEmpty()) {
+        throw IllegalArgumentException("Value configs must not be empty")
+    }
+
     if (!file.exists()) {
-        logger.warn("File ${file.name} not found")
+        logger.warn("File ${file.toAbsolutePath()} not found")
         return@sequence
+    }
+
+    // Валидация на дублирующиеся пути
+    val duplicatePaths = valueConfigs
+        .groupBy { it.path.joinToString("/") }
+        .filter { it.value.size > 1 }
+        .keys
+
+    if (duplicatePaths.isNotEmpty()) {
+        throw IllegalArgumentException("Duplicate paths found in valueConfigs: $duplicatePaths")
     }
 
     val encodingInfo = if (encoding != null) {
         EncodingInfo(encoding)
     } else {
         val detectedEncoding = detectXmlEncoding(file)
-        logger.info("Detected encoding for ${file.name}: $detectedEncoding")
+        logger.info("Detected encoding for ${file.toAbsolutePath()}: $detectedEncoding")
         detectedEncoding
     }
 
     yieldAll(parseXmlElementsWithEncoding(
         file = file,
-        tags = tags,
+        rootPath = rootPath,
+        valueConfigs = valueConfigs,
         enumValues = enumValues,
         encodingInfo = encodingInfo,
     ))
@@ -46,8 +85,9 @@ fun parseXmlElements(
 
 private fun parseXmlElementsWithEncoding(
     file: Path,
-    tags: List<String>,
-    enumValues: Map<String, Set<String>> = emptyMap(),
+    rootPath: List<String>,
+    valueConfigs: Iterable<XmlValueConfig>,
+    enumValues: Map<String, Set<String>>,
     encodingInfo: EncodingInfo
 ): Sequence<Map<String, String>> = sequence {
     val xmlInputFactory = XMLInputFactory.newInstance().apply {
@@ -59,76 +99,200 @@ private fun parseXmlElementsWithEncoding(
     }
 
     var processedCount = 0
+    var skippedCount = 0
     var xmlReader: XMLStreamReader? = null
     val currentPath = mutableListOf<String>()
+    val elementStack = mutableListOf<ElementData>()
 
-    try {
-        file.inputStream().use { inputStream ->
-            // Пропускаем BOM если он есть
-            if (encodingInfo.bomSize > 0) {
-                inputStream.skip(encodingInfo.bomSize.toLong())
-            }
-            
-            // Буферизация для улучшения производительности
-            val bufferedStream = BufferedInputStream(inputStream)
-            val reader = InputStreamReader(bufferedStream, encodingInfo.charset)
-            val bufferedReader = BufferedReader(reader, 8192)
+    val parsingTime = measureTimeMillis {
+        try {
+            file.inputStream().use { inputStream ->
+                // Пропускаем BOM если он есть
+                if (encodingInfo.bomSize > 0) {
+                    inputStream.skip(encodingInfo.bomSize.toLong())
+                }
 
-            xmlReader = xmlInputFactory.createXMLStreamReader(bufferedReader)
-            while (xmlReader!!.hasNext()) {
-                val eventType = xmlReader!!.next()
+                val bufferedStream = BufferedInputStream(inputStream)
+                val reader = InputStreamReader(bufferedStream, encodingInfo.charset)
+                val bufferedReader = BufferedReader(reader, 8192)
 
-                when (eventType) {
-                    START_ELEMENT -> {
-                        val tagName = xmlReader!!.localName
-                        currentPath.add(tagName)
+                val streamReader = xmlInputFactory.createXMLStreamReader(bufferedReader)
+                xmlReader = streamReader // сохраняем для finally блока
 
-                        // Проверяем только последние N элементов пути (где N = длина tags)
-                        val shouldProcess = tags.isNotEmpty() &&
-                                currentPath.size >= tags.size &&
-                                currentPath.takeLast(tags.size) == tags
+                while (streamReader.hasNext()) {
+                    val eventType = streamReader.next()
 
-                        if (shouldProcess) {
-                            val attributes = (0 until xmlReader!!.attributeCount).associate { i ->
-                                xmlReader!!.getAttributeLocalName(i) to (xmlReader!!.getAttributeValue(i)?.trim() ?: "")
+                    when (eventType) {
+                        START_ELEMENT -> {
+                            val tagName = streamReader.localName
+                            currentPath.add(tagName)
+
+                            // Получаем атрибуты текущего элемента
+                            val attributes = (0 until streamReader.attributeCount).associate { i ->
+                                streamReader.getAttributeLocalName(i) to (streamReader.getAttributeValue(i)?.trim() ?: "")
                             }
 
-                            if (attributes.isNotEmpty()) {
-                                val canHandle = enumValues.isEmpty() || enumValues
-                                    .map { (k, _) -> k to attributes[k] }
-                                    .filter { (_, v) -> v != null }
-                                    .all { (k, v) -> enumValues[k]?.contains(v) == true }
+                            // Создаем новый элемент
+                            val newElement = ElementData(
+                                tagName = tagName,
+                                attributes = attributes,
+                                content = StringBuilder()
+                            )
 
-                                if (canHandle) {
-                                    yield(attributes)
-                                    processedCount++
+                            // Добавляем как дочерний элемент к последнему в стеке
+                            if (elementStack.isNotEmpty()) {
+                                elementStack.last().children.add(newElement)
+                            }
 
-                                    if (processedCount % 10000 == 0) {
-                                        logger.info("Processed $processedCount records (path: ${currentPath.joinToString("/")}) from ${file.name}")
+                            elementStack.add(newElement)
+
+                            // Проверяем, достигли ли мы корневого элемента для обработки
+                            val isRootElement = rootPath.isNotEmpty() &&
+                                    currentPath.size >= rootPath.size &&
+                                    currentPath.takeLast(rootPath.size) == rootPath
+
+                            if (isRootElement) {
+                                newElement.isRoot = true
+                            }
+                        }
+
+                        CHARACTERS -> {
+                            if (elementStack.isNotEmpty()) {
+                                val text = streamReader.text ?: ""
+                                elementStack.last().content.append(text)
+                            }
+                        }
+
+                        END_ELEMENT -> {
+                            if (elementStack.isNotEmpty()) {
+                                val closedElement = elementStack.removeAt(elementStack.size - 1)
+                                val closedPath = currentPath.toList() // Сохраняем путь для логирования
+
+                                // Если это корневой элемент, собираем все данные
+                                if (closedElement.isRoot) {
+                                    val result = collectElementData(closedElement, valueConfigs)
+
+                                    if (result.isNotEmpty()) {
+                                        // Проверяем enum ограничения
+                                        if (isValidRecord(result, valueConfigs, enumValues)) {
+                                            yield(result)
+                                            processedCount++
+
+                                            if (processedCount % 10000 == 0) {
+                                                logger.info("Processed $processedCount records (path: ${closedPath.joinToString("/")}) from ${file.toAbsolutePath()}")
+                                            }
+                                        } else {
+                                            skippedCount++
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
-                    END_ELEMENT -> {
-                        if (currentPath.isNotEmpty()) {
-                            currentPath.removeAt(currentPath.size - 1)
+
+                            if (currentPath.isNotEmpty()) {
+                                currentPath.removeAt(currentPath.size - 1)
+                            }
                         }
                     }
                 }
             }
+
+        } catch (e: Exception) {
+            logger.error("Error parsing file ${file.toAbsolutePath()}: ${e.message}")
+            throw e
+        } finally {
+            try {
+                xmlReader?.close()
+            } catch (e: Exception) {
+                logger.warn("Error closing XML stream: ${e.message}")
+            }
+        }
+    }
+
+    logger.info("Completed parsing ${file.toAbsolutePath()}: $processedCount records processed, $skippedCount skipped, took ${parsingTime}ms")
+}
+
+private data class ElementData(
+    val tagName: String,
+    val attributes: Map<String, String>,
+    val content: StringBuilder,
+    var isRoot: Boolean = false,
+    val children: MutableList<ElementData> = mutableListOf()
+)
+
+private fun collectElementData(
+    rootElement: ElementData,
+    valueConfigs: Iterable<XmlValueConfig>
+): Map<String, String> {
+    val result = mutableMapOf<String, String>()
+
+    // Создаем индекс всех элементов по путям — начиная с корневого тега
+    val elementsByPath = mutableMapOf<List<String>, ElementData>()
+    buildElementIndex(rootElement, listOf(rootElement.tagName), elementsByPath)
+
+    // Обрабатываем каждую конфигурацию значений
+    for (config in valueConfigs) {
+        val value = when (config.valueType) {
+            XmlValueType.ATTRIBUTE -> {
+                // Для атрибутов: путь до элемента + имя атрибута
+                val elementPath = config.path.dropLast(1)
+                val attributeName = config.path.last()
+                val fullPath = listOf(rootElement.tagName) + elementPath
+                elementsByPath[fullPath]?.attributes?.get(attributeName)
+            }
+            XmlValueType.CONTENT -> {
+                // Для контента: полный путь = корневой тег + путь из конфига
+                val fullPath = listOf(rootElement.tagName) + config.path
+                elementsByPath[fullPath]?.content?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            }
         }
 
-        logger.info("Completed parsing ${file.name}: $processedCount records")
+        if (value != null) {
+            val key = config.outputKey
+            if (key in result) {
+                logger.warn("Output key '$key' already exists in result (path: ${config.path.joinToString("/")}). Overwriting value.")
+            }
+            result[key] = value
+        }
+    }
 
-    } catch (e: Exception) {
-        logger.error("Error parsing file ${file.name}: ${e.message}")
-        throw e
-    } finally {
-        try {
-            xmlReader?.close()
-        } catch (e: Exception) {
-            logger.warn("Error closing XML stream: ${e.message}")
+    return result
+}
+
+private fun buildElementIndex(
+    element: ElementData,
+    currentPath: List<String>,
+    index: MutableMap<List<String>, ElementData>
+) {
+    // Добавляем текущий элемент в индекс
+    index[currentPath] = element
+
+    // Рекурсивно обрабатываем дочерние элементы
+    for (child in element.children) {
+        val childPath = currentPath + child.tagName
+        buildElementIndex(child, childPath, index)
+    }
+}
+
+private fun isValidRecord(
+    result: Map<String, String>,
+    valueConfigs: Iterable<XmlValueConfig>,
+    enumValues: Map<String, Set<String>> = emptyMap(),
+): Boolean {
+    return valueConfigs.all { config ->
+        val value = result[config.outputKey]
+
+        if (config.required && value == null) {
+            logger.debug("Record invalid: required field missing at ${config.outputKey}")
+            return@all false
+        }
+
+        // Если enumValues пуст - любое значение подходит
+        // Если значение не найдено (null) - считаем валидным (если не required)
+        // Если значение найдено - проверяем вхождение в enum
+        (enumValues.isEmpty() || value == null || enumValues.contains(value)).also {
+            if (!it) {
+                logger.debug("Record invalid: value '$value' not in enum for ${config.outputKey}")
+            }
         }
     }
 }
@@ -136,10 +300,7 @@ private fun parseXmlElementsWithEncoding(
 /**
  * Информация о кодировке XML файла
  */
-data class EncodingInfo(
-    val charset: Charset,
-    val bomSize: Int = 0
-)
+data class EncodingInfo(val charset: Charset, val bomSize: Int = 0)
 
 /**
  * Определяет кодировку XML файла из XML declaration или BOM
@@ -248,22 +409,4 @@ private fun parseXmlDeclarationEncoding(headerText: String): Charset? {
 fun isXmlFile(fileName: String, extensions: Set<String> = setOf("xml")): Boolean {
     val ext = fileName.substringAfterLast('.', "").lowercase()
     return extensions.any { it.equals(ext, ignoreCase = true) }
-}
-
-/**
- * Удобные константы для часто используемых кодировок
- */
-object XmlEncodings {
-    val UTF_8: Charset = StandardCharsets.UTF_8
-    val UTF_16: Charset = StandardCharsets.UTF_16
-    val UTF_16BE: Charset = StandardCharsets.UTF_16BE
-    val UTF_16LE: Charset = StandardCharsets.UTF_16LE
-    val ISO_8859_1: Charset = StandardCharsets.ISO_8859_1
-    val US_ASCII: Charset = StandardCharsets.US_ASCII
-
-    // Популярные кодировки для русского языка
-    val WINDOWS_1251: Charset = Charset.forName("windows-1251")
-    val CP866: Charset = Charset.forName("cp866")
-    val KOI8_R: Charset = Charset.forName("koi8-r")
-    val KOI8_U: Charset = Charset.forName("koi8-u")
 }

@@ -16,7 +16,7 @@ import kotlin.system.exitProcess
 
 enum class PathType { DIR, ARCHIVE, XML }
 
-data class MappingWithFile(val xmlFile: Path, val mapping: MappingTable)
+data class MappingWithFile(val xmlFile: Path, val mapping: MappingConfig)
 
 class XmlState(val path: Path, extractDir: String?, private val fileMasks: Set<Regex> = emptySet()) {
     init {
@@ -105,20 +105,7 @@ fun main(args: Array<String>) {
 
     val config = loadAppConfig(Path(envPath)).apply { validate() }
     val mappings = config.loadMappings()
-
-    val hasMappingErrors = mappings.any { mapping ->
-        val errors = mapping.validate()
-        errors.forEach { (key, value) ->
-            logger.error("$key: $value")
-        }
-        errors.isNotEmpty()
-    }
-
-    if (hasMappingErrors) {
-        error("Has mapping errors")
-    }
-
-    val xmlState = XmlState(Path(xmlPath), extractDir, mappings.map { it.xmlFileRegex }.toSet())
+    val xmlState = XmlState(Path(xmlPath), extractDir, mappings.map { it.xml.fileRegex }.toSet())
 
     runBlocking {
         config.db.createDataSource().use { db ->
@@ -128,7 +115,7 @@ fun main(args: Array<String>) {
 
             val flow = xmlState.xmlFiles.mapNotNull { xml ->
                 val mapping = mappings.firstOrNull { m ->
-                    m.xmlFileRegex.matches(xml.fileName.toString())
+                    m.xml.fileRegex.matches(xml.fileName.toString())
                 }
 
                 if (mapping == null) {
@@ -147,8 +134,8 @@ fun main(args: Array<String>) {
                     try {
                         val upserter = PostgresUpserter(
                             dataSource = db,
-                            table = TableIdentifier(mapping.table, mapping.schema ?: ""),
-                            uniqueColumns = mapping.uniqueColumns,
+                            table = TableIdentifier(mapping.db.table, mapping.db.schema ?: ""),
+                            uniqueColumns = mapping.db.uniqueColumns,
                         )
 
                         var batchCount = 0
@@ -156,16 +143,15 @@ fun main(args: Array<String>) {
                         val batchFlow = flow {
                             parseXmlElements(
                                 file = xml,
-                                tags = mapping.xmlTags,
-                                enumValues = mapping.enumValues,
-                            ).chunked(mapping.batchSize).forEach { batch ->
-                                val mappedBatch = batch.map { item ->
-                                    mapping.attributes.entries.mapNotNull { (tag, col) ->
-                                        item[tag]?.let { value -> col to value }
-                                    }.toMap()
-                                }
-                                emit(mappedBatch)
-                            }
+                                valueConfigs = mapping.xml.values.entries.map { (k, v) -> XmlValueConfig(
+                                    path = v.path,
+                                    valueType = v.valueType,
+                                    required = v.required,
+                                    outputKey = k,
+                                ) }.toSet(),
+                                rootPath = mapping.xml.rootPath,
+                                enumValues = mapping.xml.enums,
+                            ).chunked(mapping.db.batchSize).forEach { batch -> emit(batch) }
                         }.flowOn(Dispatchers.IO).buffer(2)
 
                         batchFlow.collect { mappedBatch ->

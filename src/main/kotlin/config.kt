@@ -33,14 +33,14 @@ data class AppConfig(
     val removeXmlAfterImport: Boolean = false,
     val stopOnError: Boolean = false,
 ) {
-    fun loadMappings(): List<MappingTable> {
+    fun loadMappings(): List<MappingConfig> {
         val file = File(mappingsFile)
 
         if (!file.exists()) {
             throw IllegalArgumentException("Mappings file not exists: $mappingsFile")
         }
 
-        return MappingTable.parseItems(file)
+        return MappingConfig.parseItems(file)
     }
 
     fun validate() {
@@ -94,7 +94,7 @@ fun loadAppConfig(envPath: Path): AppConfig {
         removeArchivesAfterUnpack = env["REMOVE_ARCHIVES_AFTER_UNPACK"]?.toBoolean() ?: false,
         removeXmlAfterImport = env["REMOVE_XML_AFTER_IMPORT"]?.toBoolean() ?: false,
         stopOnError = env["STOP_ON_ERROR"]?.toBoolean() ?: false,
-    );
+    )
 
     logger.info("Configuration loaded: DB=${db.host}:${db.port}/${db.database}")
     return cfg

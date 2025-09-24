@@ -18,7 +18,11 @@ enum class PathType { DIR, ARCHIVE, XML }
 
 data class MappingWithFile(val xmlFile: Path, val mapping: MappingConfig)
 
-class XmlState(val path: Path, extractDir: String?, private val fileMasks: Set<Regex> = emptySet()) {
+class XmlState(
+    val path: Path, extractDir: String?,
+    private val fileMasks: Set<Regex> = emptySet(),
+    maxItemSizeBytes: Long = MAX_ARCHIVE_ITEM_SIZE,
+) {
     init {
         if (!path.exists()) {
             error("XML file, directory, or archive not found: $path")
@@ -62,6 +66,7 @@ class XmlState(val path: Path, extractDir: String?, private val fileMasks: Set<R
         PathType.ARCHIVE -> extractArchive(
             archiveFile = path,
             extractDir = pathToExtractArchive!!,
+            maxItemSizeBytes = maxItemSizeBytes,
             checkerFileNameForExtract = { f ->
                 val b = Path(f).fileName.toString()
 
@@ -105,7 +110,13 @@ fun main(args: Array<String>) {
 
     val config = loadAppConfig(Path(envPath)).apply { validate() }
     val mappings = config.loadMappings()
-    val xmlState = XmlState(Path(xmlPath), extractDir, mappings.map { it.xml.filesRegex }.flatten().toSet())
+
+    val xmlState = XmlState(
+        path = Path(xmlPath),
+        extractDir = extractDir,
+        fileMasks = mappings.map { it.xml.filesRegex }.flatten().toSet(),
+        maxItemSizeBytes = config.maxArchiveItemSize,
+    )
 
     runBlocking {
         config.db.createDataSource().use { db ->
@@ -117,7 +128,7 @@ fun main(args: Array<String>) {
                 val fileName = xml.fileName.toString()
 
                 val mapping = mappings.firstOrNull { m ->
-                    m.xml.filesRegex.all { it.matches(fileName) }
+                    m.xml.filesRegex.any { it.matches(fileName) }
                 }
 
                 if (mapping == null) {

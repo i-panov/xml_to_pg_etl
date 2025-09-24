@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm") version "2.1.10"
-    id("com.github.johnrengelman.shadow") version "7.1.2"
+    kotlin("jvm") version "2.2.20"
+    id("com.github.johnrengelman.shadow") version "8.1.1"
     application
 }
 
@@ -16,32 +16,39 @@ application {
 }
 
 dependencies {
-    testImplementation(kotlin("test"))
+    val kotlinVersion = "2.2.20"
+
+    implementation(kotlin("stdlib", kotlinVersion))
+    testImplementation(kotlin("test", kotlinVersion))
 
     // Корутины
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 
     // HikariCP
-    implementation("com.zaxxer:HikariCP:5.0.1")
+    implementation("com.zaxxer:HikariCP:7.0.2")
 
     // PostgreSQL
-    implementation("org.postgresql:postgresql:42.7.4")
+    implementation("org.postgresql:postgresql:42.7.5")
 
     // Jackson для XML
-    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.19.0")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.19.0")
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.19.2")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.19.2")
 
     // Kotlin reflect (та же версия, что и Kotlin)
-    implementation(kotlin("reflect"))
+    implementation(kotlin("reflect", kotlinVersion))
 
     // Commons Compress
-    implementation("org.apache.commons:commons-compress:1.26.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
 
     // CLI
-    implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.6")
+    implementation("com.github.ajalt.clikt:clikt:5.0.1")
 
     // Логгирование
-    implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation("ch.qos.logback:logback-classic:1.5.18")
+
+    // TOML
+    implementation("com.akuleshov7:ktoml-core:0.7.1")
+    implementation("com.akuleshov7:ktoml-file:0.7.1")
 }
 
 tasks.test {

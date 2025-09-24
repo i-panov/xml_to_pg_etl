@@ -42,5 +42,5 @@ bin/
 .DS_Store
 
 .gigaide/*
-.env
+env.toml
 

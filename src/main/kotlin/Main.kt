@@ -1,8 +1,9 @@
 package ru.my
 
-import kotlinx.cli.ArgParser
-import kotlinx.cli.ArgType
-import kotlinx.cli.required
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.main
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -81,44 +82,33 @@ class XmlState(
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
-fun main(args: Array<String>) {
-    val logger = LoggerFactory.getLogger("Main")
-    val parser = ArgParser("XML_TO_PG_ETL")
-
-    val envPath by parser.option(ArgType.String,
-        fullName = "env",
-        shortName = "e",
-        description = "Path to .env file",
+class EtlCommand : CliktCommand() {
+    private val envPath: String by option(
+        "-e", "--env", help = "Path to env file",
     ).required()
 
-    val xmlPath by parser.option(ArgType.String,
-        fullName = "xml",
-        shortName = "x",
-        description = "Path to XML files dir or archive",
+    private val xmlPath: String by option(
+        "-x", "--xml", help = "Path to XML files dir or archive",
     ).required()
 
-    val extractDir by parser.option(ArgType.String,
-        fullName = "extract-dir",
-        shortName = "d",
-        description = "Directory for archive extraction (temporary if not specified)",
-    )
+    private val extractDir: String by option(
+        "-d", "--extract-dir", help = "Directory for archive extraction (temporary if not specified)",
+    ).required()
 
-    parser.parse(args)
+    private val config by lazy { loadAppConfig(Path(envPath)) }
 
-    logger.info("ENV file: $envPath")
-    logger.info("XML file: $xmlPath")
+    private val mappings by lazy { config.loadMappings() }
 
-    val config = loadAppConfig(Path(envPath)).apply { validate() }
-    val mappings = config.loadMappings()
-
-    val xmlState = XmlState(
+    private val xmlState by lazy { XmlState(
         path = Path(xmlPath),
         extractDir = extractDir,
         fileMasks = mappings.map { it.xml.filesRegex }.flatten().toSet(),
         maxItemSizeBytes = config.maxArchiveItemSize,
-    )
+    ) }
 
-    runBlocking {
+    private val logger = LoggerFactory.getLogger(::javaClass.get())
+
+    override fun run() = runBlocking {
         config.db.createDataSource().use { db ->
             val processedCount = AtomicInteger(0)
             val errorCount = AtomicInteger(0)
@@ -215,3 +205,5 @@ fun main(args: Array<String>) {
         }
     }
 }
+
+fun main(args: Array<String>) = EtlCommand().main(args)

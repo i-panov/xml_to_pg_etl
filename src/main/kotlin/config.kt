@@ -1,11 +1,27 @@
 package ru.my
 
+import com.akuleshov7.ktoml.Toml
+import com.akuleshov7.ktoml.source.decodeFromStream
 import com.zaxxer.hikari.HikariDataSource
-import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Path
-import kotlin.io.path.exists
-import kotlin.io.path.readLines
+import kotlin.io.path.inputStream
+
+data class DbProps(
+    val connectionTimeout: Int = 30,
+    val idleTimeout: Int = 2 * 60,
+    val maxLifetime: Int = 20 * 60,
+    val validationTimeout: Int = 5,
+    val socketTimeout: Int = 15 * 60,
+) {
+    init {
+        require(connectionTimeout >= 0) { "Connection timeout must be non-negative" }
+        require(idleTimeout >= 0) { "Idle timeout must be non-negative" }
+        require(maxLifetime >= 0) { "Max lifetime must be non-negative" }
+        require(validationTimeout >= 0) { "Validation timeout must be non-negative" }
+        require(socketTimeout >= 0) { "Socket timeout must be non-negative" }
+    }
+}
 
 data class DbConfig(
     val host: String,
@@ -13,12 +29,13 @@ data class DbConfig(
     val user: String,
     val password: String,
     val database: String,
+    val props: DbProps = DbProps(),
 ) {
     val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}"
 
     fun createDataSource(): HikariDataSource = createDataSource(this)
 
-    fun validate() {
+    init {
         require(host.isNotBlank()) { "DB host cannot be blank" }
         require(port in 1..65535) { "DB port must be between 1 and 65535" }
         require(user.isNotBlank()) { "DB user cannot be blank" }
@@ -44,60 +61,9 @@ data class AppConfig(
         return MappingConfig.parseItems(file)
     }
 
-    fun validate() {
-        db.validate()
+    init {
         require(mappingsFile.isNotBlank()) { "Mappings file path cannot be blank" }
     }
 }
 
-private val logger = LoggerFactory.getLogger("AppConfigLoader")
-
-fun parseEnvFile(path: Path): Map<String, String> {
-    if (!path.exists()) {
-        throw IllegalArgumentException("Environment file not found: $path")
-    }
-
-    return path.readLines()
-        .mapIndexedNotNull { index, line ->
-            val trimmed = line.trim()
-            when {
-                trimmed.isEmpty() || trimmed.startsWith("#") -> null
-                "=" !in trimmed -> {
-                    logger.warn("Warning: Invalid format at line ${index + 1}: $line")
-                    null
-                }
-                else -> {
-                    val (key, value) = trimmed.split("=", limit = 2)
-                    // Убираем кавычки если есть
-                    val cleanValue = value.trim().removeSurrounding("\"").removeSurrounding("'")
-                    key.trim() to cleanValue
-                }
-            }
-        }.toMap()
-}
-
-fun loadAppConfig(envPath: Path): AppConfig {
-    logger.info("Loading configuration from: $envPath")
-    val env = parseEnvFile(envPath)
-
-    val db = DbConfig(
-        host = env["DB_HOST"] ?: error("DB_HOST is required"),
-        port = env["DB_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 }
-            ?: 5432,
-        user = env["DB_USER"] ?: error("DB_USER is required"),
-        password = env["DB_PASSWORD"] ?: error("DB_PASSWORD is required"),
-        database = env["DB_DATABASE"] ?: error("DB_DATABASE is required"),
-    )
-
-    val cfg = AppConfig(
-        db = db,
-        mappingsFile = env["MAPPINGS_FILE"] ?: error("MAPPINGS_FILE is required"),
-        removeArchivesAfterUnpack = env["REMOVE_ARCHIVES_AFTER_UNPACK"]?.toBoolean() ?: false,
-        removeXmlAfterImport = env["REMOVE_XML_AFTER_IMPORT"]?.toBoolean() ?: false,
-        stopOnError = env["STOP_ON_ERROR"]?.toBoolean() ?: false,
-        maxArchiveItemSize = env["MAX_ARCHIVE_ITEM_SIZE"]?.toLongOrNull() ?: MAX_ARCHIVE_ITEM_SIZE,
-    )
-
-    logger.info("Configuration loaded: DB=${db.host}:${db.port}/${db.database}")
-    return cfg
-}
+fun loadAppConfig(path: Path): AppConfig = path.inputStream().use { Toml.decodeFromStream<AppConfig>(it) }

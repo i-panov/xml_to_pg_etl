@@ -7,6 +7,7 @@ import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     val config = HikariConfig().apply {
@@ -21,15 +22,18 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
         maximumPoolSize = min(suggestedPoolSize, 16) // Не более 16 соединений!
         minimumIdle = max(2, maximumPoolSize / 4) // Динамический, но скромный
 
-        connectionTimeout = 30_000
-        idleTimeout = 2 * 60 * 1000
-        maxLifetime = 20 * 60 * 1000
-        validationTimeout = 5_000
+        connectionTimeout = dbConfig.props.connectionTimeout.toLong() * 1000
+        idleTimeout = dbConfig.props.idleTimeout.toLong() * 1000
+        maxLifetime = dbConfig.props.maxLifetime.toLong() * 1000
+        validationTimeout = dbConfig.props.validationTimeout.toLong() * 1000
 
-        addDataSourceProperty("socketTimeout", "700")
+        addDataSourceProperty("socketTimeout", dbConfig.props.socketTimeout.toString())
         addDataSourceProperty("tcpKeepAlive", "true")
         addDataSourceProperty("reWriteBatchedInserts", "true")
-        addDataSourceProperty("options", "-c statement_timeout=600000")
+
+        // statement_timeout должен сработать ДО socketTimeout, чтобы сервер успел прервать запрос
+        val statementTimeout = (dbConfig.props.socketTimeout * 1000 * 0.85).roundToInt()
+        addDataSourceProperty("options", "-c statement_timeout=$statementTimeout")
     }
     return HikariDataSource(config)
 }

@@ -48,7 +48,7 @@ data class DatabaseMapping(
 }
 
 data class XmlMapping(
-    val file: String,
+    val files: Set<String>,
 
     @JsonProperty("root_path")
     val rootPath: List<String>,
@@ -57,11 +57,15 @@ data class XmlMapping(
 
     val enums: Map<String, Set<String>> = emptyMap(), // tagName : values
 ) {
-    val fileRegex = Regex(file)
+    val filesRegex = files.map { it.toRegex() }
 
     init {
-        if (file.isBlank()) {
-            throw IllegalArgumentException("file is blank")
+        if (files.isEmpty()) {
+            throw IllegalArgumentException("files is empty")
+        }
+
+        if (files.any { it.isBlank() }) {
+            throw IllegalArgumentException("files contains blank")
         }
 
         if (rootPath.isEmpty()) {
@@ -70,10 +74,6 @@ data class XmlMapping(
 
         if (values.isEmpty()) {
             throw IllegalArgumentException("values is empty")
-        }
-
-        if (enums.isEmpty()) {
-            throw IllegalArgumentException("enums is empty")
         }
     }
 }

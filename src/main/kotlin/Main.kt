@@ -105,7 +105,7 @@ fun main(args: Array<String>) {
 
     val config = loadAppConfig(Path(envPath)).apply { validate() }
     val mappings = config.loadMappings()
-    val xmlState = XmlState(Path(xmlPath), extractDir, mappings.map { it.xml.fileRegex }.toSet())
+    val xmlState = XmlState(Path(xmlPath), extractDir, mappings.map { it.xml.filesRegex }.flatten().toSet())
 
     runBlocking {
         config.db.createDataSource().use { db ->
@@ -114,8 +114,10 @@ fun main(args: Array<String>) {
             val concurrency = Runtime.getRuntime().availableProcessors()
 
             val flow = xmlState.xmlFiles.mapNotNull { xml ->
+                val fileName = xml.fileName.toString()
+
                 val mapping = mappings.firstOrNull { m ->
-                    m.xml.fileRegex.matches(xml.fileName.toString())
+                    m.xml.filesRegex.all { it.matches(fileName) }
                 }
 
                 if (mapping == null) {

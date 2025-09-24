@@ -16,10 +16,8 @@ application {
 }
 
 dependencies {
-    val kotlinVersion = "2.2.20"
-
-    implementation(kotlin("stdlib", kotlinVersion))
-    testImplementation(kotlin("test", kotlinVersion))
+    implementation(kotlin("stdlib"))
+    testImplementation(kotlin("test"))
 
     // Корутины
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
@@ -35,7 +33,7 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.19.2")
 
     // Kotlin reflect (та же версия, что и Kotlin)
-    implementation(kotlin("reflect", kotlinVersion))
+    implementation(kotlin("reflect"))
 
     // Commons Compress
     implementation("org.apache.commons:commons-compress:1.28.0")
@@ -57,7 +55,7 @@ tasks.test {
 
 tasks.shadowJar {
     archiveFileName.set("xml_to_pg_etl.jar")
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    duplicatesStrategy = DuplicatesStrategy.WARN
     mergeServiceFiles()
     manifest {
         attributes["Main-Class"] = "ru.my.MainKt"

@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.2.20"
+    kotlin("plugin.serialization") version "2.2.20"
     id("com.github.johnrengelman.shadow") version "8.1.1"
     application
 }
@@ -47,6 +48,7 @@ dependencies {
     // TOML
     implementation("com.akuleshov7:ktoml-core:0.7.1")
     implementation("com.akuleshov7:ktoml-file:0.7.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
 }
 
 tasks.test {

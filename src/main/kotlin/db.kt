@@ -50,7 +50,7 @@ data class TableIdentifier(
     }
 
     val fullyQualifiedName: String get() {
-        return sequenceOf(mapper(name), mapper(schema))
+        return sequenceOf(mapper(schema), mapper(name))
             .filter { it.isNotBlank() }
             .joinToString(".")
     }

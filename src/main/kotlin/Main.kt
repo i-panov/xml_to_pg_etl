@@ -95,14 +95,12 @@ class EtlCommand : CliktCommand() {
         "-d", "--extract-dir", help = "Directory for archive extraction (temporary if not specified)",
     ).required()
 
-    private val config by lazy { loadAppConfig(Path(envPath)) }
-
-    private val mappings by lazy { config.loadMappings() }
+    private val config by lazy { AppConfig.load(Path(envPath)) }
 
     private val xmlState by lazy { XmlState(
         path = Path(xmlPath),
         extractDir = extractDir,
-        fileMasks = mappings.map { it.xml.filesRegex }.flatten().toSet(),
+        fileMasks = config.mappings.map { it.xml.filesRegex }.flatten().toSet(),
         maxItemSizeBytes = config.maxArchiveItemSize,
     ) }
 
@@ -117,7 +115,7 @@ class EtlCommand : CliktCommand() {
             val flow = xmlState.xmlFiles.mapNotNull { xml ->
                 val fileName = xml.fileName.toString()
 
-                val mapping = mappings.firstOrNull { m ->
+                val mapping = config.mappings.firstOrNull { m ->
                     m.xml.filesRegex.any { it.matches(fileName) }
                 }
 

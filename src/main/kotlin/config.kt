@@ -3,10 +3,12 @@ package ru.my
 import com.akuleshov7.ktoml.Toml
 import com.akuleshov7.ktoml.source.decodeFromStream
 import com.zaxxer.hikari.HikariDataSource
+import kotlinx.serialization.Serializable
 import java.io.File
 import java.nio.file.Path
 import kotlin.io.path.inputStream
 
+@Serializable
 data class DbProps(
     val connectionTimeout: Int = 30,
     val idleTimeout: Int = 2 * 60,
@@ -23,6 +25,7 @@ data class DbProps(
     }
 }
 
+@Serializable
 data class DbConfig(
     val host: String,
     val port: Int = 5432,
@@ -43,6 +46,7 @@ data class DbConfig(
     }
 }
 
+@Serializable
 data class AppConfig(
     val db: DbConfig,
     val mappingsFile: String,
@@ -51,19 +55,21 @@ data class AppConfig(
     val stopOnError: Boolean = false,
     val maxArchiveItemSize: Long = MAX_ARCHIVE_ITEM_SIZE,
 ) {
-    fun loadMappings(): List<MappingConfig> {
+    val mappings by lazy {
         val file = File(mappingsFile)
 
         if (!file.exists()) {
             throw IllegalArgumentException("Mappings file not exists: $mappingsFile")
         }
 
-        return MappingConfig.parseItems(file)
+        MappingConfig.parseItems(file)
     }
 
     init {
         require(mappingsFile.isNotBlank()) { "Mappings file path cannot be blank" }
     }
-}
 
-fun loadAppConfig(path: Path): AppConfig = path.inputStream().use { Toml.decodeFromStream<AppConfig>(it) }
+    companion object {
+        fun load(path: Path): AppConfig = path.inputStream().use { Toml.decodeFromStream<AppConfig>(it) }
+    }
+}

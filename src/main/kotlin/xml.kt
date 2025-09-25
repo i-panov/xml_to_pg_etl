@@ -281,19 +281,19 @@ private fun isValidRecord(
     return valueConfigs.all { config ->
         val value = result[config.outputKey]
 
-        if (config.required && value == null) {
+        if (config.required && value.isNullOrBlank()) {
             logger.debug("Record invalid: required field missing at ${config.outputKey}")
             return@all false
         }
 
-        // Если enumValues пуст - любое значение подходит
-        // Если значение не найдено (null) - считаем валидным (если не required)
-        // Если значение найдено - проверяем вхождение в enum
-        (enumValues.isEmpty() || value == null || enumValues.contains(value)).also {
-            if (!it) {
-                logger.debug("Record invalid: value '$value' not in enum for ${config.outputKey}")
-            }
+        val enumSet = enumValues[config.outputKey]
+        val isValid = enumSet.isNullOrEmpty() || enumSet.contains(value)
+
+        if (!isValid) {
+            logger.debug("Record invalid: value '$value' not in enum for ${config.outputKey}")
         }
+
+        isValid
     }
 }
 
@@ -396,7 +396,7 @@ private fun parseXmlDeclarationEncoding(headerText: String): Charset? {
 
         return try {
             Charset.forName(encodingName.trim())
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             logger.warn("Unsupported encoding '$encodingName' in XML declaration")
             null
         }

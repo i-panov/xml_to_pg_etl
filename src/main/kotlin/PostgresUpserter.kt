@@ -5,28 +5,64 @@ import javax.sql.DataSource
 class PostgresUpserter(
     val dataSource: DataSource,
     val table: TableIdentifier,
+    val targetColumns: Set<String>,
     val uniqueColumns: Set<String>,
 ) {
-    private val conflictTarget = uniqueColumns.joinToString(", ") { quoteDbIdent(it) }
-
-    private val allTableColumns = run {
-        dataSource.connection.use {
-            it.metaData.getColumnsInfo(table)
-        }
-    }
+    private val allTableColumns = dataSource.connection.use { it.metaData.getColumnsInfo(table) }
 
     init {
         if (allTableColumns.isEmpty()) {
             throw IllegalArgumentException("Table $table not found or has no columns")
         }
 
+        if (targetColumns.isEmpty()) {
+            throw IllegalArgumentException("No target columns specified")
+        }
+
         val columnNames = allTableColumns.map { it.name.lowercase() }.toSet()
 
-        if (!uniqueColumns.all { it.lowercase() in columnNames }) {
-            val missingColumns = uniqueColumns.filterNot { it.lowercase() in columnNames }
-            throw IllegalArgumentException(
-                "Unique columns not found in table $table: ${missingColumns.joinToString()}"
-            )
+        val validationMap = sequenceOf(
+            "Target" to targetColumns,
+            "Unique" to uniqueColumns,
+        )
+
+        for ((name, columns) in validationMap) {
+            val missingColumns = columns.filterNot { it.lowercase() in columnNames }
+
+            if (missingColumns.isNotEmpty()) {
+                throw IllegalArgumentException(
+                    "$name columns not found in table $table: ${missingColumns.joinToString()}"
+                )
+            }
+        }
+    }
+
+    val workingColumns by lazy {
+        allTableColumns.filter { it.name.lowercase() in targetColumns }
+    }
+
+    val sql by lazy {
+        buildString {
+            val quotedWorkingColumns = workingColumns.map { quoteDbIdent(it.name) }
+
+            val placeholdersForRow = workingColumns.joinToString(", ") { "?" }
+
+            val conflictTarget = uniqueColumns.joinToString(", ") { quoteDbIdent(it) }
+
+            val updateSet = workingColumns
+                .filterNot { col -> uniqueColumns.any { it.lowercase() == col.name.lowercase() } }
+                .joinToString(", ") { "${quoteDbIdent(it.name)} = EXCLUDED.${quoteDbIdent(it.name)}" }
+
+            append("INSERT INTO ${table.fullyQualifiedName} (")
+            append(quotedWorkingColumns.joinToString(", "))
+            append(") VALUES ($placeholdersForRow)")
+            append(" ON CONFLICT ($conflictTarget) ")
+
+            if (updateSet.isNotEmpty()) {
+                append("DO UPDATE SET $updateSet")
+            } else {
+                append("DO NOTHING")
+            }
         }
     }
 
@@ -44,36 +80,6 @@ class PostgresUpserter(
         // Нормализуем ключи в нижний регистр для консистентности
         val itemsNormalized = items.map { item ->
             item.entries.associate { (k, v) -> k.lowercase() to v }
-        }
-
-        // Находим пересечение колонок из БД и колонок из items
-        val itemColumnNames = itemsNormalized.flatMap { it.keys }.toSet()
-        val workingColumns = allTableColumns.filter { col ->
-            col.name.lowercase() in itemColumnNames
-        }
-
-        if (workingColumns.isEmpty()) {
-            throw IllegalArgumentException("No matching columns found between items and table schema")
-        }
-
-        val quotedWorkingColumns = workingColumns.map { quoteDbIdent(it.name) }
-        val placeholdersForRow = workingColumns.joinToString(", ") { "?" }
-
-        // Формируем SET часть только для не-уникальных колонок, которые есть в данных
-        val updateSet = workingColumns
-            .filterNot { col -> uniqueColumns.any { it.lowercase() == col.name.lowercase() } }
-            .joinToString(", ") { "${quoteDbIdent(it.name)} = EXCLUDED.${quoteDbIdent(it.name)}" }
-
-        val sql = buildString {
-            append("INSERT INTO ${table.fullyQualifiedName} (")
-            append(quotedWorkingColumns.joinToString(", "))
-            append(") VALUES ($placeholdersForRow)")
-            append(" ON CONFLICT ($conflictTarget) ")
-            if (updateSet.isNotEmpty()) {
-                append("DO UPDATE SET $updateSet")
-            } else {
-                append("DO NOTHING")
-            }
         }
 
         dataSource.connection.use { conn ->

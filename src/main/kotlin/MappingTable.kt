@@ -53,7 +53,7 @@ data class XmlMapping(
     @JsonProperty("root_path")
     val rootPath: List<String>,
 
-    val values: Map<String, ValueMapping>, // tagName : value
+    val values: Map<String, ValueMapping>, // columnName : value
 
     val enums: Map<String, Set<String>> = emptyMap(), // tagName : values
 ) {
@@ -91,4 +91,6 @@ data class ValueMapping(
             throw IllegalArgumentException("path is empty")
         }
     }
+
+    fun toXmlValueConfig(outputKey: String): XmlValueConfig = XmlValueConfig(path, valueType, required, outputKey)
 }

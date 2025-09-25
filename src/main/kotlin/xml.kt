@@ -182,7 +182,7 @@ private fun parseXmlElementsWithEncoding(
                                             yield(result)
                                             processedCount++
 
-                                            if (processedCount % 10000 == 0) {
+                                            if (processedCount % 50000 == 0) {
                                                 logger.info(buildString {
                                                     append("Processed $processedCount records ")
                                                     append("(path: $closedPath)")

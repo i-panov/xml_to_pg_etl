@@ -136,20 +136,19 @@ class EtlCommand : CliktCommand() {
                         val upserter = PostgresUpserter(
                             dataSource = db,
                             table = TableIdentifier(mapping.db.table, mapping.db.schema ?: ""),
+                            targetColumns = mapping.xml.values.keys,
                             uniqueColumns = mapping.db.uniqueColumns,
                         )
+
+                        logger.info("Starting processing ${xml.fileName}. Query: ${upserter.sql}")
 
                         var batchCount = 0
 
                         val batchFlow = flow {
                             parseXmlElements(
                                 file = xml,
-                                valueConfigs = mapping.xml.values.entries.map { (k, v) -> XmlValueConfig(
-                                    path = v.path,
-                                    valueType = v.valueType,
-                                    required = v.required,
-                                    outputKey = k,
-                                ) }.toSet(),
+                                valueConfigs = mapping.xml.values.entries
+                                    .map { (k, v) -> v.toXmlValueConfig(k) }.toSet(),
                                 rootPath = mapping.xml.rootPath,
                                 enumValues = mapping.xml.enums,
                             ).chunked(mapping.db.batchSize).forEach { batch -> emit(batch) }
@@ -160,7 +159,7 @@ class EtlCommand : CliktCommand() {
                                 val startTime = System.currentTimeMillis()
                                 upserter.execute(mappedBatch)
                                 val duration = System.currentTimeMillis() - startTime
-                                if (duration > 5000) { // Логируем только долгие батчи
+                                if (duration > 60 * 1000) { // Логируем только долгие батчи
                                     logger.debug("Batch executed in ${duration}ms (size: ${mappedBatch.size})")
                                 }
                             }

@@ -7,8 +7,7 @@ class PostgresUpserter(
     val table: TableIdentifier,
     val uniqueColumns: Set<String>,
 ) {
-    private val fullyQualifiedTarget = table.buildFullyQualifiedName { quoteIdent(it) }
-    private val conflictTarget = uniqueColumns.joinToString(", ") { quoteIdent(it) }
+    private val conflictTarget = uniqueColumns.joinToString(", ") { quoteDbIdent(it) }
 
     private val allTableColumns = run {
         dataSource.connection.use {
@@ -57,16 +56,16 @@ class PostgresUpserter(
             throw IllegalArgumentException("No matching columns found between items and table schema")
         }
 
-        val quotedWorkingColumns = workingColumns.map { quoteIdent(it.name) }
+        val quotedWorkingColumns = workingColumns.map { quoteDbIdent(it.name) }
         val placeholdersForRow = workingColumns.joinToString(", ") { "?" }
 
         // Формируем SET часть только для не-уникальных колонок, которые есть в данных
         val updateSet = workingColumns
             .filterNot { col -> uniqueColumns.any { it.lowercase() == col.name.lowercase() } }
-            .joinToString(", ") { "${quoteIdent(it.name)} = EXCLUDED.${quoteIdent(it.name)}" }
+            .joinToString(", ") { "${quoteDbIdent(it.name)} = EXCLUDED.${quoteDbIdent(it.name)}" }
 
         val sql = buildString {
-            append("INSERT INTO $fullyQualifiedTarget (")
+            append("INSERT INTO ${table.fullyQualifiedName} (")
             append(quotedWorkingColumns.joinToString(", "))
             append(") VALUES ($placeholdersForRow)")
             append(" ON CONFLICT ($conflictTarget) ")
@@ -97,6 +96,4 @@ class PostgresUpserter(
             }
         }
     }
-
-    private fun quoteIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
 }

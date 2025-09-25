@@ -38,13 +38,21 @@ fun createDataSource(dbConfig: DbConfig): HikariDataSource {
     return HikariDataSource(config)
 }
 
-data class TableIdentifier(val name: String, val schema: String = "") {
-    fun buildFullyQualifiedName(mapper: (String) -> String): String {
-        return if (schema.isEmpty()) {
-            mapper(name)
-        } else {
-            mapper(schema) + "." + mapper(name)
-        }
+fun quoteDbIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
+
+data class TableIdentifier(
+    val name: String,
+    val schema: String = "",
+    val mapper: (String) -> String = { quoteDbIdent(it) },
+) {
+    init {
+        require(name.isNotBlank()) { "Table name cannot be empty" }
+    }
+
+    val fullyQualifiedName: String get() {
+        return sequenceOf(mapper(name), mapper(schema))
+            .filter { it.isNotBlank() }
+            .joinToString(".")
     }
 }
 
@@ -64,9 +72,13 @@ data class ColumnInfo(
 // EXTENSIONS
 //-----------------------------------------------------------------------------------------------------------
 
-fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> = sequence {
-    while (next()) {
-        yield(mapper(this@map))
+fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> {
+    require(!isClosed) { "ResultSet is closed" }
+
+    return sequence {
+        while (next()) {
+            yield(mapper(this@map))
+        }
     }
 }
 

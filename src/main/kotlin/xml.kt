@@ -7,6 +7,7 @@ import java.io.InputStreamReader
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.util.*
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.XMLStreamConstants.*
 import javax.xml.stream.XMLStreamReader
@@ -350,7 +351,8 @@ fun detectXmlEncoding(file: Path): EncodingInfo {
     }
 }
 
-private fun ByteArray.startsWith(prefix: ByteArray) = size >= prefix.size && contentEquals(prefix)
+private fun ByteArray.startsWith(prefix: ByteArray) = size >= prefix.size && Arrays.equals(
+    this, 0, prefix.size, prefix, 0, prefix.size)
 
 private class BomRule(intBytes: IntArray, val charset: Charset) {
     val bytes = intBytes.map { it.toByte() }.toByteArray()

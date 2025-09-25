@@ -15,6 +15,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.inputStream
 import kotlin.io.path.name
 import kotlin.system.measureTimeMillis
+import kotlin.collections.ArrayDeque as KotlinArrayDeque
 
 private val logger = LoggerFactory.getLogger("XmlParser")
 
@@ -103,7 +104,7 @@ private fun parseXmlElementsWithEncoding(
     var skippedCount = 0
     var xmlReader: XMLStreamReader? = null
     val currentPath = mutableListOf<String>()
-    val elementStack = mutableListOf<ElementData>()
+    val elementStack = KotlinArrayDeque<XmlNode>()
 
     val parsingTime = measureTimeMillis {
         try {
@@ -130,11 +131,13 @@ private fun parseXmlElementsWithEncoding(
 
                             // Получаем атрибуты текущего элемента
                             val attributes = (0 until streamReader.attributeCount).associate { i ->
-                                streamReader.getAttributeLocalName(i) to (streamReader.getAttributeValue(i)?.trim() ?: "")
+                                val key = streamReader.getAttributeLocalName(i)
+                                val value = streamReader.getAttributeValue(i)
+                                key to (value?.trim() ?: "")
                             }
 
                             // Создаем новый элемент
-                            val newElement = ElementData(
+                            val newElement = XmlNode(
                                 tagName = tagName,
                                 attributes = attributes,
                                 content = StringBuilder()
@@ -166,8 +169,8 @@ private fun parseXmlElementsWithEncoding(
 
                         END_ELEMENT -> {
                             if (elementStack.isNotEmpty()) {
-                                val closedElement = elementStack.removeAt(elementStack.size - 1)
-                                val closedPath = currentPath.toList() // Сохраняем путь для логирования
+                                val closedElement = elementStack.removeLast()
+                                val closedPath = currentPath.joinToString("/") // Сохраняем путь для логирования
 
                                 // Если это корневой элемент, собираем все данные
                                 if (closedElement.isRoot) {
@@ -180,7 +183,11 @@ private fun parseXmlElementsWithEncoding(
                                             processedCount++
 
                                             if (processedCount % 10000 == 0) {
-                                                logger.info("Processed $processedCount records (path: ${closedPath.joinToString("/")}) from ${file.toAbsolutePath()}")
+                                                logger.info(buildString {
+                                                    append("Processed $processedCount records ")
+                                                    append("(path: $closedPath)")
+                                                    append(" from ${file.toAbsolutePath()}")
+                                                })
                                             }
                                         } else {
                                             skippedCount++
@@ -190,7 +197,7 @@ private fun parseXmlElementsWithEncoding(
                             }
 
                             if (currentPath.isNotEmpty()) {
-                                currentPath.removeAt(currentPath.size - 1)
+                                currentPath.removeLast()
                             }
                         }
                     }
@@ -209,25 +216,30 @@ private fun parseXmlElementsWithEncoding(
         }
     }
 
-    logger.info("Completed parsing ${file.toAbsolutePath()}: $processedCount records processed, $skippedCount skipped, took ${parsingTime}ms")
+    logger.info(buildString {
+        append("Completed parsing ${file.toAbsolutePath()}: ")
+        append("$processedCount records processed, ")
+        append("$skippedCount skipped, ")
+        append("took ${parsingTime}ms")
+    })
 }
 
-private data class ElementData(
+private data class XmlNode(
     val tagName: String,
     val attributes: Map<String, String>,
     val content: StringBuilder,
     var isRoot: Boolean = false,
-    val children: MutableList<ElementData> = mutableListOf()
+    val children: MutableList<XmlNode> = mutableListOf()
 )
 
 private fun collectElementData(
-    rootElement: ElementData,
+    rootElement: XmlNode,
     valueConfigs: Iterable<XmlValueConfig>
 ): Map<String, String> {
     val result = mutableMapOf<String, String>()
 
     // Создаем индекс всех элементов по путям — начиная с корневого тега
-    val elementsByPath = mutableMapOf<List<String>, ElementData>()
+    val elementsByPath = mutableMapOf<List<String>, XmlNode>()
     buildElementIndex(rootElement, listOf(rootElement.tagName), elementsByPath)
 
     // Обрабатываем каждую конфигурацию значений
@@ -250,7 +262,11 @@ private fun collectElementData(
         if (value != null) {
             val key = config.outputKey
             if (key in result) {
-                logger.warn("Output key '$key' already exists in result (path: ${config.path.joinToString("/")}). Overwriting value.")
+                logger.warn(buildString {
+                    append("Output key '$key' already exists in result ")
+                    append("(path: ${config.path.joinToString("/")}). ")
+                    append("Overwriting value.")
+                })
             }
             result[key] = value
         }
@@ -260,9 +276,9 @@ private fun collectElementData(
 }
 
 private fun buildElementIndex(
-    element: ElementData,
+    element: XmlNode,
     currentPath: List<String>,
-    index: MutableMap<List<String>, ElementData>
+    index: MutableMap<List<String>, XmlNode>
 ) {
     // Добавляем текущий элемент в индекс
     index[currentPath] = element

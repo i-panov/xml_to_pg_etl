@@ -1,42 +1,8 @@
 package ru.my
 
-import com.zaxxer.hikari.HikariConfig
-import com.zaxxer.hikari.HikariDataSource
 import java.math.BigDecimal
 import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
-
-fun createDataSource(dbConfig: DbConfig): HikariDataSource {
-    val config = HikariConfig().apply {
-        jdbcUrl = dbConfig.jdbcUrl
-        username = dbConfig.user
-        password = dbConfig.password
-
-        // ОСНОВНАЯ НАСТРОЙКА: уменьшаем пул, но не так радикально
-        // Формула: Ядра * 2, но с жестким ограничением сверху.
-        // Это дает параллелизм, но предотвращает бесконтрольный рост.
-        val suggestedPoolSize = Runtime.getRuntime().availableProcessors() * 2
-        maximumPoolSize = min(suggestedPoolSize, 16) // Не более 16 соединений!
-        minimumIdle = max(2, maximumPoolSize / 4) // Динамический, но скромный
-
-        connectionTimeout = dbConfig.props.connectionTimeout.toLong() * 1000
-        idleTimeout = dbConfig.props.idleTimeout.toLong() * 1000
-        maxLifetime = dbConfig.props.maxLifetime.toLong() * 1000
-        validationTimeout = dbConfig.props.validationTimeout.toLong() * 1000
-
-        addDataSourceProperty("socketTimeout", dbConfig.props.socketTimeout.toString())
-        addDataSourceProperty("tcpKeepAlive", "true")
-        addDataSourceProperty("reWriteBatchedInserts", "true")
-
-        // statement_timeout должен сработать ДО socketTimeout, чтобы сервер успел прервать запрос
-        val statementTimeout = (dbConfig.props.socketTimeout * 1000 * 0.85).roundToInt()
-        addDataSourceProperty("options", "-c statement_timeout=$statementTimeout")
-    }
-    return HikariDataSource(config)
-}
 
 fun quoteDbIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
 

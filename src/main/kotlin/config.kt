@@ -2,11 +2,15 @@ package ru.my
 
 import com.akuleshov7.ktoml.Toml
 import com.akuleshov7.ktoml.source.decodeFromStream
+import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.nio.file.Path
 import kotlin.io.path.inputStream
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 @Serializable
 data class DbProps(
@@ -36,13 +40,41 @@ data class DbConfig(
 ) {
     val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}"
 
-    fun createDataSource(): HikariDataSource = createDataSource(this)
-
     init {
         require(host.isNotBlank()) { "DB host cannot be blank" }
         require(port in 1..65535) { "DB port must be between 1 and 65535" }
         require(user.isNotBlank()) { "DB user cannot be blank" }
         require(database.isNotBlank()) { "DB database cannot be blank" }
+    }
+
+    fun createDataSource(): HikariDataSource {
+        val config = HikariConfig().apply {
+            jdbcUrl = this@DbConfig.jdbcUrl
+            username = this@DbConfig.user
+            password = this@DbConfig.password
+
+            // ОСНОВНАЯ НАСТРОЙКА: уменьшаем пул, но не так радикально
+            // Формула: Ядра * 2, но с жестким ограничением сверху.
+            // Это дает параллелизм, но предотвращает бесконтрольный рост.
+            val suggestedPoolSize = Runtime.getRuntime().availableProcessors() * 2
+            maximumPoolSize = min(suggestedPoolSize, 16) // Не более 16 соединений!
+            minimumIdle = max(2, maximumPoolSize / 4) // Динамический, но скромный
+
+            connectionTimeout = props.connectionTimeout.toLong() * 1000
+            idleTimeout = props.idleTimeout.toLong() * 1000
+            maxLifetime = props.maxLifetime.toLong() * 1000
+            validationTimeout = props.validationTimeout.toLong() * 1000
+
+            addDataSourceProperty("socketTimeout", props.socketTimeout.toString())
+            addDataSourceProperty("tcpKeepAlive", "true")
+            addDataSourceProperty("reWriteBatchedInserts", "true")
+
+            // statement_timeout должен сработать ДО socketTimeout, чтобы сервер успел прервать запрос
+            val statementTimeout = (props.socketTimeout * 1000 * 0.85).roundToInt()
+            addDataSourceProperty("options", "-c statement_timeout=$statementTimeout")
+        }
+
+        return HikariDataSource(config)
     }
 }
 

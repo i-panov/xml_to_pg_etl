@@ -38,7 +38,7 @@ class PostgresUpserter(
     }
 
     val workingColumns by lazy {
-        allTableColumns.filter { it.name.lowercase() in targetColumns }
+        allTableColumns.filter { it.name in targetColumns }
     }
 
     val sql by lazy {

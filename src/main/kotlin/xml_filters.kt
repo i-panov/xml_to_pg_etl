@@ -2,12 +2,8 @@ package ru.my
 
 import org.slf4j.LoggerFactory
 import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
 import java.nio.file.Path
-import java.util.*
 import kotlin.io.path.exists
-import kotlin.io.path.inputStream
-import kotlin.io.path.name
 import kotlin.system.measureTimeMillis
 import kotlin.collections.ArrayDeque as KotlinArrayDeque
 
@@ -19,13 +15,9 @@ data class XmlValueConfig(
     val path: List<String>,
     val valueType: XmlValueType,
     val required: Boolean = false,
-    val outputKey: String = path.last(),
+    val outputKey: String,
 ) {
     init {
-        if (path.isEmpty()) {
-            throw IllegalArgumentException("Path must not be empty")
-        }
-
         if (outputKey.isEmpty()) {
             throw IllegalArgumentException("Output key must not be empty (path: $path)")
         }
@@ -41,7 +33,7 @@ data class XmlValueConfig(
  *                 Когда парсер входит в этот элемент, начинается сбор данных для одной записи.
  *                 Когда он выходит из этого элемента, запись считается завершенной и выдается.
  * @param valueConfigs Набор конфигураций, определяющих, какие значения (атрибуты или контент)
- *                     и по каким путям следует извлекать.
+ *                     и по каким путям следует извлекать. Пути в XmlValueConfig относительны rootPath.
  * @param enumValues Карта для валидации значений по перечислениям. Ключ - outputKey из XmlValueConfig,
  *                   значение - набор допустимых значений.
  * @param encoding Явная кодировка файла. Если null, кодировка будет детектирована автоматически.
@@ -50,7 +42,7 @@ data class XmlValueConfig(
  */
 fun parseXmlElements(
     file: Path,
-    rootPath: List<String>,
+    rootPath: List<String>, // Абсолютный путь от корня XML
     valueConfigs: Set<XmlValueConfig>,
     enumValues: Map<String, Set<String>> = emptyMap(),
     encoding: Charset? = null,
@@ -66,25 +58,34 @@ fun parseXmlElements(
 
     require(duplicatePaths.isEmpty()) { "Duplicate paths found in valueConfigs: $duplicatePaths" }
 
+    // Проверка на дублирующиеся outputKey (добавлено)
+    val duplicateOutputKeys = valueConfigs
+        .groupBy { it.outputKey }
+        .filter { it.value.size > 1 }
+        .keys
+    require(duplicateOutputKeys.isEmpty()) { "Duplicate output keys found in valueConfigs: $duplicateOutputKeys" }
+
+
     val encodingInfo = encoding?.let { EncodingInfo(it) } ?: detectXmlEncoding(file).also {
         logger.info("Detected encoding for ${file.toAbsolutePath()}: ${it.charset}")
     }
 
     // Предварительная обработка valueConfigs для быстрого доступа во время парсинга.
-    // Группировка конфигов по их полному пути (относительно корня XML).
-    val configsByFullPath = mutableMapOf<List<String>, MutableList<XmlValueConfig>>()
+    // Группировка конфигов по их относительному пути (относительно rootPath).
+    // Ключи здесь - это config.path или config.path.dropLast(1)
+    val configsByRelativePath = mutableMapOf<List<String>, MutableList<XmlValueConfig>>()
     valueConfigs.forEach { config ->
-        val targetPath = when (config.valueType) {
-            XmlValueType.ATTRIBUTE -> config.path.dropLast(1) // Для атрибутов путь - это путь к родительскому элементу
-            XmlValueType.CONTENT -> config.path // Для контента путь - это путь к самому элементу
+        val targetRelativePath = when (config.valueType) {
+            XmlValueType.ATTRIBUTE -> config.path.dropLast(1) // Путь к элементу, содержащему атрибут
+            XmlValueType.CONTENT -> config.path // Путь к элементу, контент которого извлекаем
         }
-        configsByFullPath.getOrPut(targetPath) { mutableListOf() }.add(config)
+        configsByRelativePath.getOrPut(targetRelativePath) { mutableListOf() }.add(config)
     }
 
     return sequence {
         var processedCount = 0
         var skippedCount = 0
-        val currentPath = mutableListOf<String>() // Отслеживает текущий путь элемента от корня XML
+        val currentPath = mutableListOf<String>() // Отслеживает текущий абсолютный путь элемента от корня XML
         val elementStack = KotlinArrayDeque<ElementContext>() // Стек для контекста текущих элементов
 
         var currentRecordData: MutableMap<String, String>? = null // Данные для текущей формируемой записи
@@ -100,18 +101,21 @@ fun parseXmlElements(
                             elementStack.add(ElementContext(event.name, event.attributes, StringBuilder()))
 
                             // Проверяем, вошли ли мы в корневой элемент, который нас интересует
-                            if (!inRootElementScope &&
-                                currentPath.size >= rootPath.size &&
-                                currentPath.takeLast(rootPath.size) == rootPath
-                            ) {
+                            // currentPath.takeLast(rootPath.size) == rootPath - это корректная проверка
+                            // на соответствие абсолютного пути rootPath.
+                            if (!inRootElementScope && currentPath == rootPath) {
                                 inRootElementScope = true
                                 currentRecordData = mutableMapOf() // Начинаем собирать данные для новой записи
                             }
 
                             // Если мы внутри rootPath, извлекаем атрибуты для текущего элемента
                             if (inRootElementScope) {
-                                val fullCurrentPath = currentPath.toList()
-                                configsByFullPath[fullCurrentPath]?.forEach { config ->
+                                // Получаем относительный путь текущего элемента от rootPath
+                                // Например, если currentPath = ["doc", "data", "item", "subitem"]
+                                // и rootPath = ["doc", "data", "item"]
+                                // то relativeCurrentPath = ["subitem"]
+                                val relativeCurrentPath = currentPath.drop(rootPath.size)
+                                configsByRelativePath[relativeCurrentPath]?.forEach { config ->
                                     if (config.valueType == XmlValueType.ATTRIBUTE) {
                                         event.attributes[config.path.last()]?.let { value ->
                                             currentRecordData?.put(config.outputKey, value)
@@ -132,8 +136,10 @@ fun parseXmlElements(
 
                                 // Если мы внутри rootPath, извлекаем контент для закрываемого элемента
                                 if (inRootElementScope) {
-                                    val fullClosedPath = currentPath.toList()
-                                    configsByFullPath[fullClosedPath]?.forEach { config ->
+                                    // Получаем относительный путь закрываемого элемента от rootPath
+                                    // currentPath на этом этапе еще содержит закрывающийся элемент
+                                    val relativeClosedPath = currentPath.drop(rootPath.size)
+                                    configsByRelativePath[relativeClosedPath]?.forEach { config ->
                                         if (config.valueType == XmlValueType.CONTENT) {
                                             val content = closedContext.contentBuilder.toString().trim()
                                             if (content.isNotEmpty()) {
@@ -144,9 +150,10 @@ fun parseXmlElements(
                                 }
 
                                 // Если закрываемый элемент является rootPath, завершаем текущую запись
-                                if (currentPath.size == rootPath.size &&
-                                    currentPath.takeLast(rootPath.size) == rootPath
-                                ) {
+                                // currentPath.size == rootPath.size && currentPath == rootPath
+                                // Эта проверка должна быть после извлечения контента,
+                                // так как контент корневого элемента обрабатывается при его закрытии.
+                                if (currentPath == rootPath) { // Проверяем, что закрываемый элемент - это наш rootPath
                                     val result = currentRecordData ?: emptyMap()
                                     if (result.isNotEmpty() && isValidRecord(result, valueConfigs, enumValues)) {
                                         yield(result) // Выдаем готовую запись
@@ -186,14 +193,6 @@ private data class ElementContext(
     val contentBuilder: StringBuilder
 )
 
-private data class XmlNode(
-    val tagName: String,
-    val attributes: Map<String, String>,
-    val content: StringBuilder,
-    var isRoot: Boolean = false,
-    val children: MutableList<XmlNode> = mutableListOf()
-)
-
 private fun isValidRecord(
     result: Map<String, String>,
     valueConfigs: Iterable<XmlValueConfig>,
@@ -203,132 +202,18 @@ private fun isValidRecord(
         val value = result[config.outputKey]
 
         if (config.required && value.isNullOrBlank()) {
-            logger.debug("Record invalid: required field missing at ${config.outputKey}")
+            logger.debug("Record invalid: required field '${config.outputKey}' missing or blank")
             return@all false
         }
 
+        // Если значение есть и есть enumValues для этого ключа, проверяем его
         val enumSet = enumValues[config.outputKey]
-        val isValid = enumSet.isNullOrEmpty() || enumSet.contains(value)
+        val isValid = enumSet.isNullOrEmpty() || (value != null && enumSet.contains(value))
 
         if (!isValid) {
-            logger.debug("Record invalid: value '$value' not in enum for ${config.outputKey}")
+            logger.debug("Record invalid: value '$value' not in enum for '${config.outputKey}'")
         }
 
         isValid
     }
-}
-
-/**
- * Информация о кодировке XML файла
- */
-data class EncodingInfo(val charset: Charset, val bomSize: Int = 0)
-
-/**
- * Определяет кодировку XML файла из XML declaration или BOM
- */
-fun detectXmlEncoding(file: Path): EncodingInfo {
-    try {
-        file.inputStream().use { inputStream ->
-            // Читаем только первые 4 байта для BOM
-            val bomBuffer = ByteArray(4)
-            val bytesRead = inputStream.read(bomBuffer)
-
-            if (bytesRead <= 0) {
-                logger.warn("Empty file ${file.name}, using UTF-8")
-                return EncodingInfo(StandardCharsets.UTF_8, 0)
-            }
-
-            // Проверяем BOM на первых считанных байтах
-            detectBOM(bomBuffer, bytesRead)?.let { charset ->
-                logger.info("Detected BOM encoding: ${charset.name()}")
-                // Определяем размер BOM вручную
-                val bomSize = when (charset) {
-                    StandardCharsets.UTF_8 -> 3
-                    StandardCharsets.UTF_16BE, StandardCharsets.UTF_16LE -> 2
-                    Charset.forName("UTF-32BE"), Charset.forName("UTF-32LE") -> 4
-                    else -> 0
-                }
-                return EncodingInfo(charset, bomSize)
-            }
-
-            // Если BOM нет, проверяем XML declaration
-            val remaining = (1024 - bytesRead).coerceAtLeast(0)
-            val headerBuffer = if (remaining > 0) {
-                // Добираем до 1024 байт или до конца файла
-                bomBuffer.copyOf(bytesRead) + inputStream.readNBytes(remaining)
-            } else {
-                bomBuffer.copyOf(bytesRead)
-            }
-
-            // Для декларации используем ASCII-совместимую кодировку
-            val headerText = String(headerBuffer, StandardCharsets.US_ASCII)
-            val encoding = parseXmlDeclarationEncoding(headerText) ?: StandardCharsets.UTF_8
-            return EncodingInfo(encoding, 0)
-        }
-    } catch (e: Exception) {
-        logger.warn("Failed to detect encoding for ${file.name}: ${e.message}, using UTF-8")
-        return EncodingInfo(StandardCharsets.UTF_8, 0)
-    }
-}
-
-private fun ByteArray.startsWith(prefix: ByteArray) = size >= prefix.size && Arrays.equals(
-    this, 0, prefix.size, prefix, 0, prefix.size)
-
-private class BomRule(intBytes: IntArray, val charset: Charset) {
-    val bytes = intBytes.map { it.toByte() }.toByteArray()
-}
-
-private val BOM_RULES = arrayOf(
-    BomRule(intArrayOf(0xEF, 0xBB, 0xBF), StandardCharsets.UTF_8),
-    BomRule(intArrayOf(0xFE, 0xFF), StandardCharsets.UTF_16BE),
-    BomRule(intArrayOf(0xFF, 0xFE), StandardCharsets.UTF_16LE),
-    BomRule(intArrayOf(0x00, 0x00, 0xFE, 0xFF), Charset.forName("UTF-32BE")),
-    BomRule(intArrayOf(0xFF, 0xFE, 0x00, 0x00), Charset.forName("UTF-32LE")),
-)
-
-/**
- * Определяет кодировку по BOM (Byte Order Mark)
- */
-private fun detectBOM(buffer: ByteArray, length: Int): Charset? {
-    return BOM_RULES.firstOrNull { rule -> length >= rule.bytes.size && buffer.startsWith(rule.bytes) }?.charset
-}
-
-/**
- * Парсит encoding из XML declaration
- */
-private fun parseXmlDeclarationEncoding(headerText: String): Charset? {
-    try {
-        // Ищем начало XML декларации
-        val declStart = headerText.indexOf("<?xml")
-        if (declStart < 0) return null
-
-        // Ищем конец XML декларации
-        val declEnd = headerText.indexOf("?>", declStart)
-        if (declEnd < 0) return null
-
-        // Извлекаем полную декларацию
-        val xmlDeclaration = headerText.substring(declStart, declEnd + 2)
-
-        // Ищем атрибут encoding
-        val encodingRegex = """encoding\s*=\s*['"]([^'"]+)['"]""".toRegex(RegexOption.IGNORE_CASE)
-        val matchResult = encodingRegex.find(xmlDeclaration) ?: return null
-
-        val encodingName = matchResult.groupValues[1]
-        logger.info("Found encoding declaration: $encodingName")
-
-        return try {
-            Charset.forName(encodingName.trim())
-        } catch (_: Exception) {
-            logger.warn("Unsupported encoding '$encodingName' in XML declaration")
-            null
-        }
-    } catch (e: Exception) {
-        logger.info("Error parsing XML declaration: ${e.message}")
-        return null
-    }
-}
-
-fun isXmlFile(fileName: String, extensions: Set<String> = setOf("xml")): Boolean {
-    val ext = fileName.substringAfterLast('.', "").lowercase()
-    return extensions.any { it.equals(ext, ignoreCase = true) }
 }

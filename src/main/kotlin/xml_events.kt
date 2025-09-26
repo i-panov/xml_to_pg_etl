@@ -113,7 +113,7 @@ fun XMLStreamReader.iterateXml(): Sequence<XmlEvent> {
                             name = currentElementState.name,
                             level = currentElementState.level,
                             localIndex = currentElementState.localIndex,
-                            globalIndex = currentElementState.globalIndex,
+                            globalIndex = currentGlobalIndex,
                             content = currentText,
                             isCData = eventType == CDATA,
                         )
@@ -135,7 +135,7 @@ fun XMLStreamReader.iterateXml(): Sequence<XmlEvent> {
                             name = closedElementState.name,
                             level = closedElementState.level,
                             localIndex = closedElementState.localIndex,
-                            globalIndex = closedElementState.globalIndex,
+                            globalIndex = currentGlobalIndex,
                         )
                     } else {
                         throw XmlParsingException("Unexpected closing tag: '$localName' without opening tag")

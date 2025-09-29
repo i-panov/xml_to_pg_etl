@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.nio.file.Paths
 import kotlin.io.path.writeText
 
 class XmlParserTest {
@@ -520,4 +521,29 @@ class XmlParserTest {
         }
         assertTrue(exception.message?.contains("Duplicate output keys found in valueConfigs") ?: false)
     }
+
+    @Test
+    fun `parseXmlElements addr_obj_types`() {
+        val path = xmlDir.resolve("addr_obj_types.xml")
+
+        val items = parseXmlElements(
+            file = path,
+            rootPath = listOf("ADDRESSOBJECTTYPES", "ADDRESSOBJECTTYPE"),
+            valueConfigs = setOf(
+                XmlValueConfig(path = listOf("ID"), valueType = XmlValueType.ATTRIBUTE, outputKey = "id"),
+                XmlValueConfig(path = listOf("NAME"), valueType = XmlValueType.ATTRIBUTE, outputKey = "NAME"),
+                XmlValueConfig(path = listOf("SHORTNAME"), valueType = XmlValueType.ATTRIBUTE, outputKey = "shortname"),
+                XmlValueConfig(path = listOf("DESC"), valueType = XmlValueType.ATTRIBUTE, outputKey = "DESC"),
+                XmlValueConfig(path = listOf("ISACTIVE"), valueType = XmlValueType.ATTRIBUTE, outputKey = "isactive"),
+                XmlValueConfig(path = listOf("ENDDATE"), valueType = XmlValueType.ATTRIBUTE, outputKey = "enddate"),
+                XmlValueConfig(path = listOf("LEVEL"), valueType = XmlValueType.ATTRIBUTE, outputKey = "LEVEL"),
+            ),
+        ).toList()
+
+        assertEquals(427, items.size)
+        println(items.first())
+    }
+
+    private val currentDir = Paths.get("").toAbsolutePath()
+    private val xmlDir = currentDir.resolve("src/test/resources/xml/")
 }

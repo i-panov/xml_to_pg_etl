@@ -136,7 +136,7 @@ class EtlCommand : CliktCommand() {
                         val upserter = PostgresUpserter(
                             dataSource = db,
                             table = TableIdentifier(mapping.db.table, mapping.db.schema ?: ""),
-                            targetColumns = mapping.xml.values.keys,
+                            targetColumns = mapping.xml.values.filter { !it.value.notForSave }.keys,
                             uniqueColumns = mapping.db.uniqueColumns,
                         )
 

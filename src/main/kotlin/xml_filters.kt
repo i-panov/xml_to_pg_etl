@@ -15,6 +15,7 @@ data class XmlValueConfig(
     val path: List<String>,
     val valueType: XmlValueType,
     val required: Boolean = false,
+    val notForSave: Boolean = false,
     val outputKey: String,
 ) {
     init {
@@ -81,6 +82,8 @@ fun parseXmlElements(
         }
         configsByRelativePath.getOrPut(targetRelativePath) { mutableListOf() }.add(config)
     }
+
+    val notForSaveKeys = valueConfigs.filter { it.notForSave }.map { it.outputKey }.toSet()
 
     return sequence {
         var processedCount = 0
@@ -156,7 +159,8 @@ fun parseXmlElements(
                                 if (currentPath == rootPath) { // Проверяем, что закрываемый элемент - это наш rootPath
                                     val result = currentRecordData ?: emptyMap()
                                     if (result.isNotEmpty() && isValidRecord(result, valueConfigs, enumValues)) {
-                                        yield(result) // Выдаем готовую запись
+                                        val clearResult = result.filter { (k, _) -> !notForSaveKeys.contains(k) }
+                                        yield(clearResult) // Выдаем готовую запись
                                         processedCount++
 
                                         if (processedCount % 50000 == 0) {

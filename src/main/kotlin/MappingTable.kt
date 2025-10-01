@@ -85,6 +85,10 @@ data class ValueMapping(
     val valueType: XmlValueType = XmlValueType.ATTRIBUTE,
 
     val required: Boolean = false,
+
+    @JsonProperty("not_for_save")
+    // Значение только для валидации
+    val notForSave: Boolean = false,
 ) {
     init {
         if (path.isEmpty()) {
@@ -92,5 +96,5 @@ data class ValueMapping(
         }
     }
 
-    fun toXmlValueConfig(outputKey: String): XmlValueConfig = XmlValueConfig(path, valueType, required, outputKey)
+    fun toXmlValueConfig(outputKey: String): XmlValueConfig = XmlValueConfig(path, valueType, required, notForSave, outputKey)
 }

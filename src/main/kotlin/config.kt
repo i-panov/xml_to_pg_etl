@@ -19,6 +19,8 @@ data class DbProps(
     val maxLifetime: Int = 20 * 60,
     val validationTimeout: Int = 5,
     val socketTimeout: Int = 15 * 60,
+    val schema: String = "",
+    val appName: String = "",
 ) {
     init {
         require(connectionTimeout >= 0) { "Connection timeout must be non-negative" }
@@ -38,7 +40,13 @@ data class DbConfig(
     val database: String,
     val props: DbProps = DbProps(),
 ) {
-    val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}"
+    val propsString = sequenceOf(
+        "ApplicationName" to props.appName,
+    ).filter { it.second.isNotBlank() }
+        .joinToString("&") { "${it.first}=${it.second}" }
+        .let { if (it.isNotBlank()) "?$it" else "" }
+
+    val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}$propsString"
 
     init {
         require(host.isNotBlank()) { "DB host cannot be blank" }
@@ -52,11 +60,12 @@ data class DbConfig(
             jdbcUrl = this@DbConfig.jdbcUrl
             username = this@DbConfig.user
             password = this@DbConfig.password
+            schema = props.schema
 
             // ОСНОВНАЯ НАСТРОЙКА: уменьшаем пул, но не так радикально
             // Формула: Ядра * 2, но с жестким ограничением сверху.
             // Это дает параллелизм, но предотвращает бесконтрольный рост.
-            val suggestedPoolSize = Runtime.getRuntime().availableProcessors() * 2
+            val suggestedPoolSize = Runtime.getRuntime().availableProcessors() * 2 + 1
             maximumPoolSize = min(suggestedPoolSize, 16) // Не более 16 соединений!
             minimumIdle = max(2, maximumPoolSize / 4) // Динамический, но скромный
 

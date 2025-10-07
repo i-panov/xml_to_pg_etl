@@ -1,5 +1,7 @@
 package ru.my
 
+import com.fasterxml.jackson.databind.DeserializationContext
+import com.fasterxml.jackson.databind.KeyDeserializer
 import java.math.BigDecimal
 import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
@@ -9,16 +11,39 @@ fun quoteDbIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
 data class TableIdentifier(
     val name: String,
     val schema: String = "",
-    val mapper: (String) -> String = { quoteDbIdent(it) },
 ) {
     init {
         require(name.isNotBlank()) { "Table name cannot be empty" }
+        require(name.length <= 63) { "Table name too long (max 63 characters)" }
+        require(schema.length <= 63) { "Schema name too long (max 63 characters)" }
     }
 
-    val fullyQualifiedName: String get() {
-        return sequenceOf(mapper(schema), mapper(name))
+    companion object {
+        fun parse(str: String): TableIdentifier {
+            val parts = str.split(".")
+            require(parts.isNotEmpty()) { "Invalid table identifier: $str" }
+
+            return if (parts.size == 1) {
+                TableIdentifier(parts[0])
+            } else {
+                TableIdentifier(parts[1], parts[0])
+            }
+        }
+    }
+
+    val fullyQualifiedName by lazy {
+        sequenceOf(schema, name)
             .filter { it.isNotBlank() }
+            .map { quoteDbIdent(it) }
             .joinToString(".")
+    }
+
+    override fun toString(): String = fullyQualifiedName
+}
+
+class TableIdentifierKeyDeserializer : KeyDeserializer() {
+    override fun deserializeKey(key: String, ctxt: DeserializationContext): TableIdentifier {
+        return TableIdentifier.parse(key)
     }
 }
 
@@ -52,7 +77,9 @@ private val columnsCache = ConcurrentHashMap<TableIdentifier, List<ColumnInfo>>(
 
 fun DatabaseMetaData.getColumnsInfo(table: TableIdentifier): List<ColumnInfo> {
     return columnsCache.getOrPut(table) {
-        getColumns(null, table.schema, table.name, null).use { it.map(::ColumnInfo).toList() }
+        getColumns(null, table.schema, table.name, null).use {
+            it.map(::ColumnInfo).toList()
+        }
     }
 }
 

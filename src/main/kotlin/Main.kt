@@ -4,16 +4,17 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
+import javax.sql.DataSource
 import kotlin.io.path.*
 import kotlin.system.exitProcess
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.measureTime
 
 enum class PathType { DIR, ARCHIVE, XML }
 
@@ -97,14 +98,16 @@ class EtlCommand : CliktCommand() {
 
     private val config by lazy { AppConfig.load(Path(envPath)) }
 
-    private val xmlState by lazy { XmlState(
-        path = Path(xmlPath),
-        extractDir = extractDir,
-        fileMasks = config.mappings.map { it.xml.filesRegex }.flatten().toSet(),
-        maxItemSizeBytes = config.maxArchiveItemSize,
-    ) }
+    private val xmlState by lazy {
+        XmlState(
+            path = Path(xmlPath),
+            extractDir = extractDir,
+            fileMasks = config.mappings.map { it.xml.filesRegex }.flatten().toSet(),
+            maxItemSizeBytes = config.maxArchiveItemSize,
+        )
+    }
 
-    private val logger = LoggerFactory.getLogger(::javaClass.get())
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     override fun run() = runBlocking {
         config.db.createDataSource().use { db ->
@@ -125,48 +128,10 @@ class EtlCommand : CliktCommand() {
                 } else {
                     MappingWithFile(xml, mapping)
                 }
-            }.onCompletion { cause ->
-                if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE && cause == null) {
-                    logger.info("All files from archive processed. Removing archive: ${xmlState.path}")
-                    xmlState.path.deleteIfExists()
-                }
             }.flatMapMerge(concurrency) { (xml, mapping) ->
                 flow {
                     try {
-                        val upserter = PostgresUpserter(
-                            dataSource = db,
-                            table = TableIdentifier(mapping.db.table, mapping.db.schema ?: ""),
-                            targetColumns = mapping.xml.values.filter { !it.value.notForSave }.keys,
-                            uniqueColumns = mapping.db.uniqueColumns,
-                        )
-
-                        logger.info("Starting processing ${xml.fileName}. Query: ${upserter.sql}")
-
-                        var batchCount = 0
-
-                        val batchFlow = flow {
-                            parseXmlElements(
-                                file = xml,
-                                valueConfigs = mapping.xml.values.entries
-                                    .map { (k, v) -> v.toXmlValueConfig(k) }.toSet(),
-                                rootPath = mapping.xml.rootPath,
-                                enumValues = mapping.xml.enums,
-                            ).chunked(mapping.db.batchSize).forEach { batch -> emit(batch) }
-                        }.flowOn(Dispatchers.IO).buffer(2)
-
-                        batchFlow.collect { mappedBatch ->
-                            withContext(Dispatchers.IO) {
-                                val startTime = System.currentTimeMillis()
-                                upserter.execute(mappedBatch)
-                                val duration = System.currentTimeMillis() - startTime
-                                if (duration > 60 * 1000) { // Логируем только долгие батчи
-                                    logger.debug("Batch executed in ${duration}ms (size: ${mappedBatch.size})")
-                                }
-                            }
-                            batchCount++
-                        }
-
-                        logger.info("Processed ${xml.fileName}: $batchCount batches")
+                        processXmlToMultipleTables(xml, mapping, db)
 
                         if (config.removeXmlAfterImport) {
                             logger.info("Removing processed XML: $xml")
@@ -177,10 +142,13 @@ class EtlCommand : CliktCommand() {
                         emit(xml)
                     } catch (e: Exception) {
                         errorCount.incrementAndGet()
-                        logger.error("Failed to process ${xml.fileName}: ${e.message}")
+                        logger.error("Failed to process ${xml.fileName}", e)
 
                         if (config.stopOnError) {
-                            throw RuntimeException("Stop on error flag is set. Terminating due to error in file: ${xml.fileName}", e)
+                            throw RuntimeException(
+                                "Stop on error flag is set. Terminating due to error in file: ${xml.fileName}",
+                                e
+                            )
                         }
                     }
                 }
@@ -188,8 +156,13 @@ class EtlCommand : CliktCommand() {
 
             try {
                 flow.collect()
+
+                if (config.removeArchivesAfterUnpack && xmlState.pathType == PathType.ARCHIVE) {
+                    logger.info("All files from archive processed. Removing archive: ${xmlState.path}")
+                    xmlState.path.deleteIfExists()
+                }
             } catch (e: Exception) {
-                logger.error("ETL process was terminated due to an error: ${e.message}")
+                logger.error("ETL process was terminated due to an error", e)
                 exitProcess(1)
             }
 
@@ -197,10 +170,149 @@ class EtlCommand : CliktCommand() {
             if (totalFiles == 0) {
                 logger.warn("No XML files found to process")
             } else {
-                logger.info("Processing complete: $totalFiles files found, ${processedCount.get()} processed successfully, ${errorCount.get()} with errors")
+                logger.info(
+                    "Processing complete: $totalFiles files found, " +
+                            "${processedCount.get()} processed successfully, " +
+                            "${errorCount.get()} with errors"
+                )
             }
         }
     }
+
+    private suspend fun processXmlToMultipleTables(
+        xml: Path,
+        mapping: MappingConfig,
+        db: DataSource
+    ) = coroutineScope {
+        val upserters = mapping.iteratePostgresUpserters(db).toList()
+
+        // Создаем каналы для каждой таблицы
+        data class TableProcessor(
+            val upserter: PostgresUpserter,
+            val channel: Channel<Map<String, String>>,
+            val batchSize: Int
+        )
+
+        val processors = upserters.map { upserter ->
+            val dbMapping = mapping.db[upserter.table]!!
+            TableProcessor(
+                upserter = upserter,
+                channel = Channel(capacity = dbMapping.batchSize * 2), // Буфер на 2 батча
+                batchSize = dbMapping.batchSize
+            )
+        }
+
+        // Producer: парсим XML и распределяем по каналам
+        val producerJob = launch(Dispatchers.IO) {
+            try {
+                val sequence = parseXmlElements(
+                    file = xml,
+                    valueConfigs = mapping.xml.values.entries
+                        .map { (k, v) -> v.toXmlValueConfig(k) }.toSet(),
+                    rootPath = mapping.xml.rootPath,
+                    enumValues = mapping.xml.enums,
+                )
+
+                for (row in sequence) {
+                    // Распределяем строку по таблицам
+                    for (processor in processors) {
+                        val tableRow = buildMap {
+                            for ((fullColumnName, value) in row) {
+                                try {
+                                    val columnId = ColumnIdentifier.parse(fullColumnName)
+                                    if (columnId.table == processor.upserter.table) {
+                                        // Используем только имя колонки без префикса
+                                        put(columnId.name, value)
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("Invalid column name: $fullColumnName", e)
+                                }
+                            }
+                        }
+
+                        if (tableRow.isNotEmpty()) {
+                            processor.channel.send(tableRow)
+                        }
+                    }
+                }
+            } finally {
+                // Закрываем все каналы
+                processors.forEach { it.channel.close() }
+            }
+        }
+
+        // Consumers: читаем из каналов и пишем в БД параллельно
+        val consumerJobs = processors.map { processor ->
+            async(Dispatchers.IO) {
+                val table = processor.upserter.table
+                logger.info("Starting processing ${xml.fileName} -> $table. Query: ${processor.upserter.sql}")
+
+                var batchCount = 0
+                var rowsProcessed = 0
+                val batch = mutableListOf<Map<String, String>>()
+
+                try {
+                    for (row in processor.channel) {
+                        batch.add(row)
+
+                        if (batch.size >= processor.batchSize) {
+                            val duration = measureTime {
+                                processor.upserter.execute(batch.toList())
+                            }
+
+                            batchCount++
+                            rowsProcessed += batch.size
+                            batch.clear()
+
+                            if (duration > 60.seconds) {
+                                logger.debug(
+                                    "Batch executed in {} (table: {}, size: {})",
+                                    duration,
+                                    table,
+                                    batch.size
+                                )
+                            }
+                        }
+                    }
+
+                    // Загружаем остаток
+                    if (batch.isNotEmpty()) {
+                        processor.upserter.execute(batch)
+                        batchCount++
+                        rowsProcessed += batch.size
+                    }
+
+                    logger.info("Completed ${xml.fileName} -> $table: $batchCount batches, $rowsProcessed rows")
+
+                    TableLoadResult(table, success = true, rowsProcessed = rowsProcessed)
+                } catch (e: Exception) {
+                    logger.error("Failed to load ${xml.fileName} -> $table", e)
+                    TableLoadResult(table, success = false, error = e)
+                }
+            }
+        }
+
+        // Ждем producer и всех consumers
+        producerJob.join()
+        val results = consumerJobs.awaitAll()
+
+        // Проверяем результаты
+        val failed = results.filter { !it.success }
+        if (failed.isNotEmpty()) {
+            val errorMsg = failed.joinToString(", ") { "${it.table}: ${it.error?.message}" }
+            throw RuntimeException("Failed to load into tables: $errorMsg")
+        }
+
+        val totalRows = results.sumOf { it.rowsProcessed }
+        logger.info("Successfully loaded ${xml.fileName}: $totalRows total rows across ${results.size} tables")
+    }
+
+    private data class TableLoadResult(
+        val table: TableIdentifier,
+        val success: Boolean,
+        val rowsProcessed: Int = 0,
+        val error: Throwable? = null
+    )
 }
 
 fun main(args: Array<String>) = EtlCommand().main(args)

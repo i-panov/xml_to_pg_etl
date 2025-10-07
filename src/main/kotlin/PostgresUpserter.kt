@@ -13,7 +13,9 @@ class PostgresUpserter(
     val targetColumns: Set<String>,
     val uniqueColumns: Set<String>,
 ) {
-    private val allTableColumns = dataSource.connection.use { it.metaData.getColumnsInfo(table) }
+    private val allTableColumns by lazy {
+        dataSource.connection.use { it.metaData.getColumnsInfo(table) }
+    }
 
     init {
         if (allTableColumns.isEmpty()) {

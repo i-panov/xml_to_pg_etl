@@ -63,12 +63,15 @@ class PostgresUpserter(
             append("INSERT INTO ${table.fullyQualifiedName} (")
             append(quotedWorkingColumns.joinToString(", "))
             append(") VALUES ($placeholdersForRow)")
-            append(" ON CONFLICT ($conflictTarget) ")
 
-            if (updateSet.isNotEmpty()) {
-                append("DO UPDATE SET $updateSet")
-            } else {
-                append("DO NOTHING")
+            if (conflictTarget.isNotBlank()) {
+                append(" ON CONFLICT ($conflictTarget) ")
+
+                if (updateSet.isNotEmpty()) {
+                    append("DO UPDATE SET $updateSet")
+                } else {
+                    append("DO NOTHING")
+                }
             }
         }
     }

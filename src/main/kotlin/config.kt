@@ -80,7 +80,8 @@ data class DbConfig(
 
             // statement_timeout должен сработать ДО socketTimeout, чтобы сервер успел прервать запрос
             val statementTimeout = (props.socketTimeout * 1000 * 0.85).roundToInt()
-            addDataSourceProperty("options", "-c statement_timeout=$statementTimeout")
+
+            connectionInitSql = "set local statement_timeout = $statementTimeout"
         }
 
         return HikariDataSource(config)

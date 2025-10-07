@@ -12,30 +12,23 @@ data class MappingConfig(
     val db: Map<TableIdentifier, DatabaseMapping> = emptyMap(),
     val xml: XmlMapping,
 ) {
-    private val xmlColumns by lazy {
-        val keys = xml.values.filter { !it.value.notForSave }.keys
+    val resolvedColumnMapping: Map<String, ColumnIdentifier> by lazy {
+        val defaultTable = if (db.keys.size == 1) db.keys.first() else null
 
-        when (db.keys.size) {
-            1 -> {
-                val defaultTable = db.keys.first()
-                keys.map { key ->
-                    if ('.' in key) ColumnIdentifier.parse(key)
-                    else ColumnIdentifier(defaultTable, key)
+        xml.values.filter { !it.value.notForSave }.keys.associateWith { key ->
+            if ('.' in key) {
+                ColumnIdentifier.parse(key)
+            } else {
+                require(defaultTable != null) {
+                    "Short column name '$key' is ambiguous because multiple tables are defined. " +
+                            "Please use the full 'schema.table.column' format."
                 }
-            }
-            else -> {
-                keys.map { key ->
-                    if ('.' !in key) {
-                        throw IllegalArgumentException(
-                            "Short column name '$key' is ambiguous because multiple tables are defined. " +
-                                    "Please use the full 'schema.table.column' format."
-                        )
-                    }
-                    ColumnIdentifier.parse(key)
-                }
+                ColumnIdentifier(defaultTable, key)
             }
         }
     }
+
+    private val xmlColumns by lazy { resolvedColumnMapping.values.toList() }
 
     init {
         require(db.isNotEmpty()) { "db section cannot be empty" }

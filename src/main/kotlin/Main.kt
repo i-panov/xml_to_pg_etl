@@ -217,15 +217,12 @@ class EtlCommand : CliktCommand() {
                     // Распределяем строку по таблицам
                     for (processor in processors) {
                         val tableRow = buildMap {
-                            for ((fullColumnName, value) in row) {
-                                try {
-                                    val columnId = ColumnIdentifier.parse(fullColumnName)
-                                    if (columnId.table == processor.upserter.table) {
-                                        // Используем только имя колонки без префикса
-                                        put(columnId.name, value)
-                                    }
-                                } catch (e: Exception) {
-                                    logger.warn("Invalid column name: $fullColumnName", e)
+                            for ((originalKey, value) in row) {
+                                val columnId = mapping.resolvedColumnMapping[originalKey] ?: continue
+
+                                if (columnId.table == processor.upserter.table) {
+                                    // Используем только имя колонки без префикса
+                                    put(columnId.name, value)
                                 }
                             }
                         }
@@ -275,7 +272,6 @@ class EtlCommand : CliktCommand() {
                         }
                     }
 
-                    // Загружаем остаток
                     if (batch.isNotEmpty()) {
                         processor.upserter.execute(batch)
                         batchCount++
@@ -292,11 +288,9 @@ class EtlCommand : CliktCommand() {
             }
         }
 
-        // Ждем producer и всех consumers
         producerJob.join()
         val results = consumerJobs.awaitAll()
 
-        // Проверяем результаты
         val failed = results.filter { !it.success }
         if (failed.isNotEmpty()) {
             val errorMsg = failed.joinToString(", ") { "${it.table}: ${it.error?.message}" }

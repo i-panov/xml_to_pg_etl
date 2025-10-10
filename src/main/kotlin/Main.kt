@@ -26,9 +26,7 @@ class XmlState(
     maxItemSizeBytes: Long = MAX_ARCHIVE_ITEM_SIZE,
 ) {
     init {
-        if (!path.exists()) {
-            error("XML file, directory, or archive not found: $path")
-        }
+        require(path.exists()) { "XML file, directory, or archive not found: $path" }
     }
 
     val pathType = run {

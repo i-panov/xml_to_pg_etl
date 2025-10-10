@@ -40,13 +40,17 @@ data class DbConfig(
     val database: String,
     val props: DbProps = DbProps(),
 ) {
-    val propsString = sequenceOf(
-        "ApplicationName" to props.appName,
-    ).filter { it.second.isNotBlank() }
-        .joinToString("&") { "${it.first}=${it.second}" }
-        .let { if (it.isNotBlank()) "?$it" else "" }
+    val propsString by lazy {
+        sequenceOf(
+            "ApplicationName" to props.appName,
+        ).filter { it.second.isNotBlank() }
+            .joinToString("&") { "${it.first}=${it.second}" }
+            .let { if (it.isNotBlank()) "?$it" else "" }
+    }
 
-    val jdbcUrl = "jdbc:postgresql://${host}:${port}/${database}$propsString"
+    val jdbcUrl by lazy {
+        "jdbc:postgresql://${host}:${port}/${database}$propsString"
+    }
 
     init {
         require(host.isNotBlank()) { "DB host cannot be blank" }

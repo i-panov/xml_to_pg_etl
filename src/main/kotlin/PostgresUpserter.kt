@@ -45,7 +45,9 @@ class PostgresUpserter(
     }
 
     val workingColumns by lazy {
-        allTableColumns.filter { it.name in targetColumns }
+        allTableColumns.filter { col ->
+            targetColumns.any { it.lowercase() == col.name.lowercase() }
+        }
     }
 
     val sql by lazy {

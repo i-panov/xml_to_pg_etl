@@ -52,20 +52,13 @@ fun parseXmlElements(
     require(valueConfigs.isNotEmpty()) { "Value configs must not be empty" }
     require(file.exists()) { "File not found: ${file.toAbsolutePath()}" }
 
-    val duplicatePaths = valueConfigs
-        .groupBy { it.path.joinToString("/") }
-        .filter { it.value.size > 1 }
-        .keys
-
-    require(duplicatePaths.isEmpty()) { "Duplicate paths found in valueConfigs: $duplicatePaths" }
-
-    // Проверка на дублирующиеся outputKey (добавлено)
+    // Проверка на дублирующиеся outputKey
     val duplicateOutputKeys = valueConfigs
         .groupBy { it.outputKey }
         .filter { it.value.size > 1 }
         .keys
-    require(duplicateOutputKeys.isEmpty()) { "Duplicate output keys found in valueConfigs: $duplicateOutputKeys" }
 
+    require(duplicateOutputKeys.isEmpty()) { "Duplicate output keys found in valueConfigs: $duplicateOutputKeys" }
 
     val encodingInfo = encoding?.let { EncodingInfo(it) } ?: detectXmlEncoding(file).also {
         logger.info("Detected encoding for ${file.toAbsolutePath()}: ${it.charset}")

@@ -111,14 +111,15 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
             return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         }
 
-        fun parseBoolean(value: String): Boolean = sequenceOf("1", "true").contains(value.lowercase())
-
         when (col.type) {
             Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
             Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR,
             Types.CLOB, Types.NCLOB, Types.ROWID -> setString(index, value)
 
-            Types.BIT, Types.BOOLEAN -> setBoolean(index, parseBoolean(value))
+            Types.BIT, Types.BOOLEAN -> {
+                val isTrue = sequenceOf("1", "true", "t", "yes", "y").contains(value.lowercase())
+                setBoolean(index, isTrue)
+            }
 
             Types.TINYINT -> {
                 try {
@@ -154,7 +155,7 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.FLOAT, Types.REAL -> {
                 try {
-                    setFloat(index, value.toFloat())
+                    setFloat(index, (value.replace(',', '.')).toFloat())
                 } catch (e: NumberFormatException) {
                     throw IllegalArgumentException("Cannot convert '$value' to FLOAT for column '${col.name}'", e)
                 }
@@ -162,7 +163,7 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.DOUBLE -> {
                 try {
-                    setDouble(index, value.toDouble())
+                    setDouble(index, (value.replace(',', '.')).toDouble())
                 } catch (e: NumberFormatException) {
                     throw IllegalArgumentException("Cannot convert '$value' to DOUBLE for column '${col.name}'", e)
                 }
@@ -170,7 +171,7 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.NUMERIC, Types.DECIMAL -> {
                 try {
-                    setBigDecimal(index, BigDecimal(value))
+                    setBigDecimal(index, BigDecimal(value.replace(',', '.')))
                 } catch (e: NumberFormatException) {
                     throw IllegalArgumentException("Cannot convert '$value' to DECIMAL for column '${col.name}'", e)
                 }

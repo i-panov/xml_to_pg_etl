@@ -25,13 +25,9 @@ data class XmlValueConfig(
             "Output key must not be empty (path: ${path.joinToString("/")})"
         }
 
-        require(path.isNotEmpty()) {
-            "Path must not be empty for outputKey: $outputKey"
-        }
-
         if (valueType == XmlValueType.ATTRIBUTE) {
-            require(path.size >= 2) {
-                "Attribute path must have at least 2 elements (element + attribute name) for outputKey: $outputKey"
+            require(path.isNotEmpty()) {
+                "Attribute path must contain at least attribute name for outputKey: $outputKey"
             }
         }
     }
@@ -164,9 +160,16 @@ private fun buildConfigIndex(valueConfigs: Set<XmlValueConfig>): ConfigIndex {
 
     valueConfigs.forEach { config ->
         val targetRelativePath = when (config.valueType) {
-            // Путь к элементу, содержащему атрибут (без имени самого атрибута)
-            XmlValueType.ATTRIBUTE -> config.path.dropLast(1)
-            // Путь к элементу, контент которого извлекаем
+            XmlValueType.ATTRIBUTE -> {
+                // Для атрибутов: если путь содержит только имя атрибута,
+                // то это атрибут самого rootPath элемента (пустой относительный путь)
+                if (config.path.size == 1) {
+                    emptyList()
+                } else {
+                    config.path.dropLast(1)
+                }
+            }
+            // Для контента: путь как есть (может быть пустым для самого rootPath)
             XmlValueType.CONTENT -> config.path
         }
 
@@ -317,6 +320,7 @@ private class XmlRecordParser(
 
         configIndex.byPath[relativeCurrentPath]?.forEach { config ->
             if (config.valueType == XmlValueType.ATTRIBUTE) {
+                // Имя атрибута - это последний элемент в config.path
                 val attributeName = config.path.last()
                 event.attributes[attributeName]?.let { value ->
                     recordData[config.outputKey] = value

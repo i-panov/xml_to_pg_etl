@@ -195,14 +195,14 @@ class EtlCommand : CliktCommand() {
             val dbMapping = mapping.db[upserter.table]!!
             TableProcessor(
                 upserter = upserter,
-                channel = Channel(capacity = dbMapping.batchSize * 2), // Буфер на 2 батча
+                channel = Channel(capacity = (dbMapping.batchSize * 2).coerceAtMost(1000)), // Буфер на 2 батча
                 batchSize = dbMapping.batchSize
             )
         }
 
         // Producer: парсим XML и распределяем по каналам
         val producerJob = launch(Dispatchers.IO) {
-            try {
+            runCatching {
                 val sequence = parseXmlElements(
                     file = xml,
                     valueConfigs = mapping.xml.values.entries
@@ -230,7 +230,7 @@ class EtlCommand : CliktCommand() {
                         }
                     }
                 }
-            } finally {
+            }.also {
                 // Закрываем все каналы
                 processors.forEach { it.channel.close() }
             }

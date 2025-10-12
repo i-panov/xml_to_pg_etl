@@ -6,8 +6,8 @@ import java.io.OutputStream
 import java.nio.file.Path
 import kotlin.io.path.outputStream
 
-// Размер буфера для streaming копирования (8KB по умолчанию)
-private const val BUFFER_SIZE = 8192
+// Размер буфера для streaming копирования (128KB по умолчанию)
+private const val BUFFER_SIZE = 131_072
 
 private fun <R> withBufferedOutput(destination: Path, block: OutputStream.() -> R): R =
     destination.outputStream().buffered().use { output -> output.block() }

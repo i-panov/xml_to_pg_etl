@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
@@ -119,35 +120,33 @@ fun extractArchive(
     }
 
     return flow {
-        try {
-            logger.info("Extracting archive: ${archiveFile.fileName} to $extractDir")
+        logger.info("Extracting archive: ${archiveFile.fileName} to $extractDir")
 
-            emitAll(when {
-                fileNameEndsWith(".zip") -> extractInternal(ArchiveStreamFactory.ZIP)
-                fileNameEndsWith(".tar") -> extractInternal(ArchiveStreamFactory.TAR)
-                fileNameEndsWith(".7z") -> extractInternal(ArchiveStreamFactory.SEVEN_Z)
-                fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") -> extractInternal(
-                    ArchiveStreamFactory.TAR, CompressorStreamFactory.GZIP,
-                )
-                fileNameEndsWith(".tar.bz2") || fileNameEndsWith(".tbz2") -> extractInternal(
-                    ArchiveStreamFactory.TAR, CompressorStreamFactory.BZIP2,
-                )
-                fileNameEndsWith(".gz") -> extractCompressed(".gz", CompressorStreamFactory.GZIP)
-                fileNameEndsWith(".bz2") -> extractCompressed(".bz2", CompressorStreamFactory.BZIP2)
-                else -> run {
-                    try {
-                        val archiveStream = inputStream.toArchiveInputStream()
-                        closeableItems.add(archiveStream)
-                        extractEntries(archiveStream)
-                    } catch (e: Exception) {
-                        logger.error("Failed to extract archive ${archiveFile.fileName}: ${e.message}")
-                        throw IllegalArgumentException("Unsupported archive format: ${archiveFile.fileName}", e)
-                    }
+        emitAll(when {
+            fileNameEndsWith(".zip") -> extractInternal(ArchiveStreamFactory.ZIP)
+            fileNameEndsWith(".tar") -> extractInternal(ArchiveStreamFactory.TAR)
+            fileNameEndsWith(".7z") -> extractInternal(ArchiveStreamFactory.SEVEN_Z)
+            fileNameEndsWith(".tar.gz") || fileNameEndsWith(".tgz") -> extractInternal(
+                ArchiveStreamFactory.TAR, CompressorStreamFactory.GZIP,
+            )
+            fileNameEndsWith(".tar.bz2") || fileNameEndsWith(".tbz2") -> extractInternal(
+                ArchiveStreamFactory.TAR, CompressorStreamFactory.BZIP2,
+            )
+            fileNameEndsWith(".gz") -> extractCompressed(".gz", CompressorStreamFactory.GZIP)
+            fileNameEndsWith(".bz2") -> extractCompressed(".bz2", CompressorStreamFactory.BZIP2)
+            else -> run {
+                try {
+                    val archiveStream = inputStream.toArchiveInputStream()
+                    closeableItems.add(archiveStream)
+                    extractEntries(archiveStream)
+                } catch (e: Exception) {
+                    logger.error("Failed to extract archive ${archiveFile.fileName}: ${e.message}")
+                    throw IllegalArgumentException("Unsupported archive format: ${archiveFile.fileName}", e)
                 }
-            }.asFlow())
-        } finally {
-            closeableItems.forEach { it.close() }
-        }
+            }
+        }.asFlow())
+    }.onCompletion {
+        closeableItems.forEach { it.close() }
     }
 }
 
@@ -164,8 +163,7 @@ private fun sanitizeFileName(fileName: String): String {
 private val ARCHIVE_EXTENSIONS = setOf(".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".gz", ".bz2", ".7z")
 
 fun isArchive(path: String): Boolean {
-    val lowerPath = path.lowercase()
-    return ARCHIVE_EXTENSIONS.any { lowerPath.endsWith(it) }
+    return ARCHIVE_EXTENSIONS.any { path.endsWith(it, ignoreCase = true) }
 }
 
 // --------------------------------------------------------------------------------------

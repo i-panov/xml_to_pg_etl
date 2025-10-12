@@ -76,7 +76,7 @@ fun <T> ResultSet.map(mapper: (ResultSet) -> T): Sequence<T> {
 private val columnsCache = ConcurrentHashMap<TableIdentifier, List<ColumnInfo>>()
 
 fun DatabaseMetaData.getColumnsInfo(table: TableIdentifier): List<ColumnInfo> {
-    return columnsCache.getOrPut(table) {
+    return columnsCache.computeIfAbsent(table) {
         getColumns(null, table.schema, table.name, null).use {
             it.map(::ColumnInfo).toList()
         }

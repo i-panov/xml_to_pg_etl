@@ -73,13 +73,19 @@ fun XMLStreamReader.iterateXml(): Sequence<XmlEvent> {
         val elementStack = ArrayDeque<ElementState>()
         var globalIndexCounter = 0L
 
+        fun cleanName(rawName: String): String {
+            val lastColonIndex = rawName.lastIndexOf(':')
+            if (lastColonIndex == -1) return rawName
+            return rawName.substring(lastColonIndex + 1)
+        }
+
         while (hasNext()) {
             val eventType = next()
             val currentGlobalIndex = globalIndexCounter++
 
             val eventToYield: XmlEvent? = when (eventType) {
                 START_ELEMENT -> {
-                    val currentName = localName
+                    val currentName = cleanName(localName)
                     val currentLevel = elementStack.size
 
                     val localIndex: Long
@@ -92,7 +98,9 @@ fun XMLStreamReader.iterateXml(): Sequence<XmlEvent> {
                     }
 
                     val attributes = (0 until attributeCount).associate { i ->
-                        getAttributeLocalName(i) to getAttributeValue(i).trim()
+                        val attrRawName = getAttributeLocalName(i)
+                        val attrKey = cleanName(attrRawName) // Очистка ключа
+                        attrKey to getAttributeValue(i).trim()
                     }
 
                     elementStack.addLast(ElementState(currentName, currentLevel, localIndex, currentGlobalIndex))
@@ -122,12 +130,14 @@ fun XMLStreamReader.iterateXml(): Sequence<XmlEvent> {
                     }
                 }
                 END_ELEMENT -> {
+                    val cleanedLocalName = cleanName(localName)
+
                     if (elementStack.isNotEmpty()) {
                         val closedElementState = elementStack.removeLast()
 
-                        if (closedElementState.name != localName) {
+                        if (closedElementState.name != cleanedLocalName) {
                             throw XmlParsingException(
-                                "Mismatched closing tag: expected '${closedElementState.name}', got '$localName'"
+                                "Mismatched closing tag: expected '${closedElementState.name}', got '$cleanedLocalName' (raw: '$localName')"
                             )
                         }
 
@@ -138,7 +148,7 @@ fun XMLStreamReader.iterateXml(): Sequence<XmlEvent> {
                             globalIndex = currentGlobalIndex,
                         )
                     } else {
-                        throw XmlParsingException("Unexpected closing tag: '$localName' without opening tag")
+                        throw XmlParsingException("Unexpected closing tag: '$cleanedLocalName' (raw: '$localName') without opening tag")
                     }
                 }
                 else -> null

@@ -228,7 +228,22 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
                 }
             }
 
-            Types.OTHER, Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
+            Types.OTHER -> {
+                // Используем typeName для определения JSON/JSONB
+                when (col.typeName) {
+                    "json", "jsonb" -> {
+                        val pgObject = org.postgresql.util.PGobject()
+                        pgObject.type = col.typeName
+                        pgObject.value = value
+                        setObject(index, pgObject)
+                    }
+                    else -> throw UnsupportedOperationException(
+                        "Type ${col.typeName} (${col.typeId}) not supported for column '${col.name}'"
+                    )
+                }
+            }
+
+            Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
             Types.ARRAY, Types.REF, Types.DATALINK, Types.SQLXML,
             Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE, Types.TIMESTAMP_WITH_TIMEZONE ->
                 throw UnsupportedOperationException("Type ${col.typeId} not supported for column '${col.name}'")

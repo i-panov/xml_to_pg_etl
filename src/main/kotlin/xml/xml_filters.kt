@@ -1,5 +1,8 @@
 package ru.my.xml
 
+import com.fasterxml.jackson.databind.node.ArrayNode
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.slf4j.LoggerFactory
 import java.nio.charset.Charset
 import java.nio.file.Path
@@ -10,7 +13,15 @@ private val logger = LoggerFactory.getLogger("XmlParser")
 
 private const val LOG_INTERVAL = 50_000
 
-enum class XmlValueType { ATTRIBUTE, CONTENT }
+// Jackson node factory для создания JSON
+private val jsonNodeFactory = JsonNodeFactory.instance
+
+enum class XmlValueType {
+    ATTRIBUTE,
+    CONTENT,
+    JSON_OBJECT,
+    JSON_ARRAY
+}
 
 data class XmlValueConfig(
     val path: List<String>,
@@ -18,6 +29,7 @@ data class XmlValueConfig(
     val required: Boolean = false,
     val notForSave: Boolean = false,
     val outputKey: String,
+    val structure: Map<String, XmlValueConfig>? = null,
 ) {
     init {
         require(outputKey.isNotEmpty()) {
@@ -27,6 +39,12 @@ data class XmlValueConfig(
         if (valueType == XmlValueType.ATTRIBUTE) {
             require(path.isNotEmpty()) {
                 "Attribute path must contain at least attribute name for outputKey: $outputKey"
+            }
+        }
+
+        if (valueType in sequenceOf(XmlValueType.JSON_OBJECT, XmlValueType.JSON_ARRAY)) {
+            require(structure != null) {
+                "$valueType type requires 'structure' field for outputKey: $outputKey"
             }
         }
     }
@@ -164,6 +182,8 @@ private fun extractValuesFromNode(
         val value = when (config.valueType) {
             XmlValueType.ATTRIBUTE -> extractAttribute(node, config.path)
             XmlValueType.CONTENT -> extractContent(node, config.path)
+            XmlValueType.JSON_OBJECT -> buildJsonObject(node, config)
+            XmlValueType.JSON_ARRAY -> buildJsonArray(node, config)
         }
 
         if (value != null && value.isNotBlank()) {
@@ -172,6 +192,116 @@ private fun extractValuesFromNode(
     }
 
     return result
+}
+
+/**
+ * Строит JSON объект из узла согласно структуре.
+ * Возвращает JSON строку.
+ */
+private fun buildJsonObject(node: XmlNode, config: XmlValueConfig): String? {
+    val jsonNode = buildJsonObjectNode(node, config) ?: return null
+    return jsonNode.toString()
+}
+
+/**
+ * Строит JSON массив из узлов согласно структуре элементов.
+ * Возвращает JSON строку.
+ */
+private fun buildJsonArray(node: XmlNode, config: XmlValueConfig): String? {
+    val jsonNode = buildJsonArrayNode(node, config) ?: return null
+    return jsonNode.toString()
+}
+
+/**
+ * Строит ObjectNode (Jackson) из узла.
+ */
+private fun buildJsonObjectNode(node: XmlNode, config: XmlValueConfig): ObjectNode? {
+    require(config.structure != null) { "JSON_OBJECT requires structure" }
+
+    val targetNode = if (config.path.isEmpty()) {
+        node
+    } else {
+        findNodeByPath(node, config.path) ?: return null
+    }
+
+    val jsonObject = jsonNodeFactory.objectNode()
+
+    for ((key, subConfig) in config.structure) {
+        when (subConfig.valueType) {
+            XmlValueType.ATTRIBUTE -> {
+                extractAttribute(targetNode, subConfig.path)?.let {
+                    jsonObject.put(key, it)
+                }
+            }
+            XmlValueType.CONTENT -> {
+                extractContent(targetNode, subConfig.path)?.let {
+                    jsonObject.put(key, it)
+                }
+            }
+            XmlValueType.JSON_OBJECT -> {
+                buildJsonObjectNode(targetNode, subConfig)?.let {
+                    jsonObject.set(key, it)
+                }
+            }
+            XmlValueType.JSON_ARRAY -> {
+                buildJsonArrayNode(targetNode, subConfig)?.let {
+                    jsonObject.set(key, it)
+                }
+            }
+        }
+    }
+
+    return jsonObject
+}
+
+/**
+ * Строит ArrayNode (Jackson) из узлов.
+ */
+private fun buildJsonArrayNode(node: XmlNode, config: XmlValueConfig): ArrayNode? {
+    require(config.structure != null) { "JSON_ARRAY requires structure" }
+
+    val childNodes = if (config.path.isEmpty()) {
+        node.children
+    } else {
+        findAllNodesByPath(node, config.path)
+    }
+
+    if (childNodes.isEmpty()) return null
+
+    val jsonArray = jsonNodeFactory.arrayNode()
+
+    for (childNode in childNodes) {
+        val itemObject = jsonNodeFactory.objectNode()
+
+        for ((key, subConfig) in config.structure) {
+            when (subConfig.valueType) {
+                XmlValueType.ATTRIBUTE -> {
+                    extractAttribute(childNode, subConfig.path)?.let {
+                        itemObject.put(key, it)
+                    }
+                }
+                XmlValueType.CONTENT -> {
+                    extractContent(childNode, subConfig.path)?.let {
+                        itemObject.put(key, it)
+                    }
+                }
+                XmlValueType.JSON_OBJECT -> {
+                    buildJsonObjectNode(childNode, subConfig)?.let {
+                        itemObject.set(key, it)
+                    }
+                }
+                XmlValueType.JSON_ARRAY -> {
+                    buildJsonArrayNode(childNode, subConfig)?.let {
+                        itemObject.set(key, it)
+                    }
+                }
+            }
+        }
+
+        jsonArray.add(itemObject)
+    }
+
+    return jsonArray
 }
 
 /**
@@ -238,6 +368,23 @@ private fun findNodeByPath(root: XmlNode, path: List<String>): XmlNode? {
     }
 
     return current
+}
+
+/**
+ * Находит ВСЕ узлы по пути (для массивов).
+ */
+private fun findAllNodesByPath(root: XmlNode, path: List<String>): List<XmlNode> {
+    if (path.isEmpty()) return listOf(root)
+
+    if (path.size == 1) {
+        return root.children.filter { it.name == path[0] }
+    }
+
+    val parentPath = path.dropLast(1)
+    val targetName = path.last()
+
+    val parentNode = findNodeByPath(root, parentPath) ?: return emptyList()
+    return parentNode.children.filter { it.name == targetName }
 }
 
 /**

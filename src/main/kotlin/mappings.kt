@@ -105,7 +105,7 @@ data class XmlMapping(
 }
 
 data class ValueMapping(
-    val path: List<String>,
+    val path: List<String> = emptyList(),
 
     @param:JsonProperty("type")
     val valueType: XmlValueType = XmlValueType.ATTRIBUTE,
@@ -114,13 +114,37 @@ data class ValueMapping(
 
     @param:JsonProperty("not_for_save")
     val notForSave: Boolean = false,
+
+    // Для JSON_OBJECT и JSON_ARRAY: структура полей
+    @param:JsonProperty("structure")
+    val structure: Map<String, ValueMapping>? = null,
 ) {
     init {
-        require(path.isNotEmpty()) { "path list cannot be empty" }
+        if (valueType !in setOf(XmlValueType.JSON_OBJECT, XmlValueType.JSON_ARRAY)) {
+            require(path.isNotEmpty()) { "path list cannot be empty for non-JSON types" }
+        }
+
+        if (valueType in sequenceOf(XmlValueType.JSON_OBJECT, XmlValueType.JSON_ARRAY)) {
+            require(structure != null) {
+                "$valueType type requires 'structure' field"
+            }
+        }
     }
 
-    fun toXmlValueConfig(outputKey: String): XmlValueConfig =
-        XmlValueConfig(path, valueType, required, notForSave, outputKey)
+    fun toXmlValueConfig(outputKey: String): XmlValueConfig {
+        val structureConfigs = structure?.mapValues { (key, mapping) ->
+            mapping.toXmlValueConfig(key)
+        }
+
+        return XmlValueConfig(
+            path = path,
+            valueType = valueType,
+            required = required,
+            notForSave = notForSave,
+            outputKey = outputKey,
+            structure = structureConfigs,
+        )
+    }
 }
 
 data class ColumnIdentifier(val table: TableIdentifier, val name: String) {

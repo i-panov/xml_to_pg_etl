@@ -94,9 +94,9 @@ class EtlCommand : CliktCommand() {
         "-x", "--xml", help = "Path to XML files dir or archive",
     ).required()
 
-    private val extractDir: String by option(
+    private val extractDir: String? by option(
         "-d", "--extract-dir", help = "Directory for archive extraction (temporary if not specified)",
-    ).required()
+    )
 
     private val config by lazy { AppConfig.load(Path(envPath)) }
 

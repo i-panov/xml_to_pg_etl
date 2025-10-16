@@ -49,12 +49,14 @@ class TableIdentifierKeyDeserializer : KeyDeserializer() {
 
 data class ColumnInfo(
     val name: String,
-    val type: Int,
+    val typeId: Int,
+    val typeName: String, // может быть полезно например для JSON, для которого typeId будет OTHER
     val isNullable: Boolean
 ) {
     constructor(rs: ResultSet): this(
         name = rs.getString("COLUMN_NAME"),
-        type = rs.getInt("DATA_TYPE"),
+        typeId = rs.getInt("DATA_TYPE"),
+        typeName = rs.getString("TYPE_NAME").lowercase(),
         isNullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable,
     )
 }
@@ -101,7 +103,7 @@ inline fun <T> Connection.withTransaction(block: () -> T): T {
 fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
     if (value == null) {
         if (col.isNullable) {
-            setNull(index, col.type)
+            setNull(index, col.typeId)
         } else {
             throw IllegalStateException("NOT NULL column '${col.name}' cannot be null")
         }
@@ -111,7 +113,7 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
             return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         }
 
-        when (col.type) {
+        when (col.typeId) {
             Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
             Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR,
             Types.CLOB, Types.NCLOB, Types.ROWID -> setString(index, value)
@@ -229,9 +231,9 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
             Types.OTHER, Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
             Types.ARRAY, Types.REF, Types.DATALINK, Types.SQLXML,
             Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE, Types.TIMESTAMP_WITH_TIMEZONE ->
-                throw UnsupportedOperationException("Type ${col.type} not supported for column '${col.name}'")
+                throw UnsupportedOperationException("Type ${col.typeId} not supported for column '${col.name}'")
 
-            else -> throw IllegalArgumentException("Unknown type: ${col.type} for column '${col.name}'")
+            else -> throw IllegalArgumentException("Unknown type: ${col.typeId} for column '${col.name}'")
         }
     }
 }

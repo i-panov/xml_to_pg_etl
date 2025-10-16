@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.module.SimpleModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import ru.my.db.PostgresUpserter
+import ru.my.db.TableIdentifier
+import ru.my.db.TableIdentifierKeyDeserializer
+import ru.my.xml.XmlValueConfig
+import ru.my.xml.XmlValueType
 import java.io.File
 import javax.sql.DataSource
 

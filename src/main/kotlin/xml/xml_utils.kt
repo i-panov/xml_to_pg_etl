@@ -1,4 +1,4 @@
-package ru.my
+package ru.my.xml
 
 import org.slf4j.LoggerFactory
 import java.nio.charset.Charset

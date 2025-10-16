@@ -8,6 +8,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import org.slf4j.LoggerFactory
+import ru.my.db.PostgresUpserter
+import ru.my.db.TableIdentifier
+import ru.my.xml.isXmlFile
+import ru.my.xml.parseXmlElements
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource

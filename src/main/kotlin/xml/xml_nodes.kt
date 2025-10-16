@@ -1,4 +1,4 @@
-package ru.my
+package ru.my.xml
 
 data class XmlNode(
     val name: String,

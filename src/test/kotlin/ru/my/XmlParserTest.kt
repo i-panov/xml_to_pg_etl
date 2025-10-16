@@ -4,6 +4,9 @@ import com.ctc.wstx.exc.WstxParsingException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import ru.my.xml.XmlValueConfig
+import ru.my.xml.XmlValueType
+import ru.my.xml.parseXmlElements
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
@@ -469,11 +472,36 @@ class XmlParserTest {
     fun `parseXmlElements should handle missing optional attributes and content`() {
         val rootPath = listOf("items", "item")
         val valueConfigs = setOf(
-            XmlValueConfig(path = listOf("id"), valueType = XmlValueType.ATTRIBUTE, outputKey = "itemId", required = true),
-            XmlValueConfig(path = listOf("type"), valueType = XmlValueType.ATTRIBUTE, outputKey = "itemType", required = false), // Optional attribute
-            XmlValueConfig(path = listOf("name"), valueType = XmlValueType.CONTENT, outputKey = "itemName", required = true),
-            XmlValueConfig(path = listOf("description"), valueType = XmlValueType.CONTENT, outputKey = "itemDescription", required = false), // Optional content
-            XmlValueConfig(path = listOf("comment"), valueType = XmlValueType.CONTENT, outputKey = "itemComment", required = false) // Optional content, whitespace only
+            XmlValueConfig(
+                path = listOf("id"),
+                valueType = XmlValueType.ATTRIBUTE,
+                outputKey = "itemId",
+                required = true
+            ),
+            XmlValueConfig(
+                path = listOf("type"),
+                valueType = XmlValueType.ATTRIBUTE,
+                outputKey = "itemType",
+                required = false
+            ), // Optional attribute
+            XmlValueConfig(
+                path = listOf("name"),
+                valueType = XmlValueType.CONTENT,
+                outputKey = "itemName",
+                required = true
+            ),
+            XmlValueConfig(
+                path = listOf("description"),
+                valueType = XmlValueType.CONTENT,
+                outputKey = "itemDescription",
+                required = false
+            ), // Optional content
+            XmlValueConfig(
+                path = listOf("comment"),
+                valueType = XmlValueType.CONTENT,
+                outputKey = "itemComment",
+                required = false
+            ) // Optional content, whitespace only
         )
 
         val records = parseXmlElements(optionalFieldsXmlFile, rootPath, valueConfigs).toList()

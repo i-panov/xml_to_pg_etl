@@ -1,4 +1,4 @@
-package ru.my
+package ru.my.db
 
 import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.KeyDeserializer

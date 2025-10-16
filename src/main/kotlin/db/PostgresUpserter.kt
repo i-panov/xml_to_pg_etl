@@ -1,4 +1,4 @@
-package ru.my
+package ru.my.db
 
 import javax.sql.DataSource
 

@@ -1,4 +1,4 @@
-package ru.my
+package ru.my.xml
 
 import java.io.BufferedReader
 import java.nio.charset.Charset

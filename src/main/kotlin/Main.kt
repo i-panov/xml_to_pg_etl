@@ -13,6 +13,7 @@ import ru.my.db.TableIdentifier
 import ru.my.xml.isXmlFile
 import ru.my.xml.parseXmlElements
 import java.nio.file.Path
+import java.sql.SQLException
 import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
 import kotlin.io.path.*
@@ -256,7 +257,21 @@ class EtlCommand : CliktCommand() {
 
                         if (batch.size >= processor.batchSize) {
                             val duration = measureTime {
-                                processor.upserter.execute(batch.toList())
+                                flow {
+                                    emit(processor.upserter.execute(batch.toList()))
+                                }.retry(3) { e ->
+                                    val msg = e.message
+
+                                    if (e is SQLException && msg != null) {
+                                        if (RETRY_ERRORS.any { msg.contains(it) }) {
+                                            delay(3.seconds)
+                                            logger.warn("Retrying SQL error: $msg")
+                                            return@retry true
+                                        }
+                                    }
+
+                                    false
+                                }.single()
                             }
 
                             batchCount++
@@ -309,6 +324,10 @@ class EtlCommand : CliktCommand() {
         val rowsProcessed: Int = 0,
         val error: Throwable? = null
     )
+
+    companion object {
+        private val RETRY_ERRORS = setOf("I/O error", "socket", "timeout", "connection")
+    }
 }
 
 fun main(args: Array<String>) = EtlCommand().main(args)

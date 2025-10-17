@@ -203,17 +203,58 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.TIMESTAMP -> {
                 try {
-                    val timestampValue = if (value.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
-                        "$value 00:00:00" // Для Timestamp.valueOf важно чтобы время было указано
-                    } else {
-                        value
+                    val timestamp = when {
+                        value.contains('+') || value.endsWith('Z') -> {
+                            // Форматы с таймзоной - конвертируем в локальное время
+                            java.time.OffsetDateTime.parse(value)
+                                .toInstant()
+                                .atZone(java.time.ZoneId.systemDefault())
+                                .toLocalDateTime()
+                        }
+                        value.contains('T') -> {
+                            // ISO format без таймзоны
+                            java.time.LocalDateTime.parse(value)
+                        }
+                        else -> {
+                            // Старый формат: YYYY-MM-DD HH:mm:ss
+                            java.time.LocalDateTime.parse(value.replace(' ', 'T'))
+                        }
                     }
-                    setTimestamp(index, Timestamp.valueOf(timestampValue))
-                } catch (e: IllegalArgumentException) {
+                    setTimestamp(index, Timestamp.valueOf(timestamp))
+                } catch (e: Exception) {
                     throw IllegalArgumentException(
-                        "Cannot convert '$value' to TIMESTAMP for column '${col.name}'. Expected format: YYYY-MM-DD HH:mm:ss",
+                        "Cannot convert '$value' to TIMESTAMP for column '${col.name}'. " +
+                                "Expected formats: YYYY-MM-DD HH:mm:ss, YYYY-MM-DDTHH:mm:ss, or formats with timezone",
                         e
                     )
+                }
+            }
+
+            Types.TIMESTAMP_WITH_TIMEZONE -> {
+                try {
+                    // Пробуем распарсить как ISO-8601 timestamp с таймзоной
+                    val instant = java.time.Instant.parse(value)
+                    setTimestamp(index, Timestamp.from(instant))
+                } catch (e: java.time.format.DateTimeParseException) {
+                    // Если не ISO-8601, пробуем как локальное время с таймзоной
+                    try {
+                        val timestampWithTz = java.time.OffsetDateTime.parse(value).toInstant()
+                        setTimestamp(index, Timestamp.from(timestampWithTz))
+                    } catch (_: java.time.format.DateTimeParseException) {
+                        // Пробуем как LocalDateTime и конвертируем в системную таймзону
+                        try {
+                            val localDateTime = java.time.LocalDateTime.parse(value)
+                            val zonedDateTime = localDateTime.atZone(java.time.ZoneId.systemDefault())
+                            setTimestamp(index, Timestamp.from(zonedDateTime.toInstant()))
+                        } catch (_: java.time.format.DateTimeParseException) {
+                            throw IllegalArgumentException(
+                                "Cannot convert '$value' to TIMESTAMP WITH TIME ZONE for column '${col.name}'. " +
+                                        "Expected formats: ISO-8601 (e.g., 2023-10-17T12:34:56Z, 2023-10-17T15:34:56+03:00) " +
+                                        "or LocalDateTime (e.g., 2023-10-17T12:34:56)",
+                                e
+                            )
+                        }
+                    }
                 }
             }
 
@@ -245,7 +286,7 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
             Types.ARRAY, Types.REF, Types.DATALINK, Types.SQLXML,
-            Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE, Types.TIMESTAMP_WITH_TIMEZONE ->
+            Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE ->
                 throw UnsupportedOperationException("Type ${col.typeId} not supported for column '${col.name}'")
 
             else -> throw IllegalArgumentException("Unknown type: ${col.typeId} for column '${col.name}'")

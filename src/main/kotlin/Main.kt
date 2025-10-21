@@ -23,7 +23,11 @@ import kotlin.time.measureTime
 
 enum class PathType { DIR, ARCHIVE, XML }
 
-data class MappingWithFile(val xmlFile: Path, val mapping: MappingConfig)
+data class FileProcessingContext(
+    val xmlFile: Path,
+    val mapping: MappingConfig,
+    val filenameValues: Map<String, String>
+)
 
 class XmlState(
     val path: Path, extractDir: String?,
@@ -126,36 +130,55 @@ class EtlCommand : CliktCommand() {
 
             val flow = xmlState.xmlFiles.mapNotNull { xml ->
                 val fileName = xml.fileName.toString()
+                var context: FileProcessingContext? = null
 
-                val mapping = config.mappings.firstOrNull { m ->
-                    m.xml.filesRegex.any { it.matches(fileName) }
+                findMap@ for (mapping in config.mappings) {
+                    for (regex in mapping.xml.filesRegex) {
+                        val matchResult = regex.find(fileName)
+                        if (matchResult != null) {
+                            // Собираем все имена групп, которые нам нужны для этого маппинга
+                            val requiredGroupNames = mapping.db.values
+                                .flatMap { it.filenameGroupsToColumns.keys }
+                                .toSet()
+
+                            // Извлекаем значения ТОЛЬКО для этих групп
+                            val filenameValues = requiredGroupNames.mapNotNull { groupName ->
+                                matchResult.groups[groupName]?.value?.let { value ->
+                                    groupName to value
+                                }
+                            }.toMap()
+
+                            context = FileProcessingContext(xml, mapping, filenameValues)
+                            break@findMap
+                        }
+                    }
                 }
 
-                if (mapping == null) {
+                if (context == null) {
                     logger.warn("No mapping found for ${xml.fileName}")
                     null
                 } else {
-                    MappingWithFile(xml, mapping)
+                    context
                 }
-            }.flatMapMerge(concurrency) { (xml, mapping) ->
+            }.flatMapMerge(concurrency) { context ->
                 flow {
                     try {
-                        processXmlToMultipleTables(xml, mapping, db)
+                        processXmlToMultipleTables(context, db)
 
                         if (config.removeXmlAfterImport) {
-                            logger.info("Removing processed XML: $xml")
-                            xml.deleteIfExists()
+                            logger.info("Removing processed XML: ${context.xmlFile}")
+                            context.xmlFile.deleteIfExists()
                         }
 
                         processedCount.incrementAndGet()
-                        emit(xml)
+                        emit(context.xmlFile)
                     } catch (e: Exception) {
                         errorCount.incrementAndGet()
-                        logger.error("Failed to process ${xml.fileName}", e)
+                        logger.error("Failed to process ${context.xmlFile.fileName}", e)
 
                         if (config.stopOnError) {
                             throw RuntimeException(
-                                "Stop on error flag is set. Terminating due to error in file: ${xml.fileName}",
+                                "Stop on error flag is set. Terminating due to error in file: ${context.xmlFile.fileName}",
                                 e
                             )
                         }
@@ -189,10 +212,11 @@ class EtlCommand : CliktCommand() {
     }
 
     private suspend fun processXmlToMultipleTables(
-        xml: Path,
-        mapping: MappingConfig,
+        context: FileProcessingContext,
         db: DataSource
     ) = coroutineScope {
+        val mapping = context.mapping
+        val xml = context.xmlFile
         val upserters = mapping.iteratePostgresUpserters(db).toList()
 
         // Создаем каналы для каждой таблицы
@@ -225,7 +249,20 @@ class EtlCommand : CliktCommand() {
                 for (row in sequence) {
                     // Распределяем строку по таблицам
                     for (processor in processors) {
-                        val tableRow = buildMap {
+                        val dbMapping = mapping.db[processor.upserter.table]!!
+                        val filenameToColumnMapping = dbMapping.filenameGroupsToColumns
+
+                        // Формируем данные из имени файла для текущей таблицы
+                        val fileData = buildMap {
+                            for ((groupName, columnName) in filenameToColumnMapping) {
+                                context.filenameValues[groupName]?.let { value ->
+                                    put(columnName, value)
+                                }
+                            }
+                        }
+
+                        // Формируем данные из XML для текущей таблицы
+                        val xmlData = buildMap {
                             for ((originalKey, value) in row) {
                                 val columnId = mapping.resolvedColumnMapping[originalKey] ?: continue
 
@@ -236,8 +273,11 @@ class EtlCommand : CliktCommand() {
                             }
                         }
 
-                        if (tableRow.isNotEmpty()) {
-                            processor.channel.send(tableRow)
+                        // Объединяем данные из XML и из имени файла
+                        val finalRow = xmlData + fileData
+
+                        if (finalRow.isNotEmpty()) {
+                            processor.channel.send(finalRow)
                         }
                     }
                 }

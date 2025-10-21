@@ -63,10 +63,17 @@ data class MappingConfig(
         val columnsGroups = xmlColumns.groupBy { it.table }
             .map { (table, cols) -> table to cols.map { it.name }.toSet() }
 
-        for ((table, columns) in columnsGroups) {
+        for ((table, columnsFromXml) in columnsGroups) {
             val mapping = this@MappingConfig.db[table]
                 ?: throw IllegalStateException("Table $table not found in db configuration. This should not happen.")
-            val upserter = PostgresUpserter(db, table, columns, mapping.uniqueColumns)
+
+            // Получаем имена колонок из маппинга имени файла
+            val columnsFromFilename = mapping.filenameGroupsToColumns.values.toSet()
+
+            // Объединяем колонки из XML и из имени файла
+            val allTargetColumns = columnsFromXml + columnsFromFilename
+
+            val upserter = PostgresUpserter(db, table, allTargetColumns, mapping.uniqueColumns)
             yield(upserter)
         }
     }
@@ -78,9 +85,20 @@ data class DatabaseMapping(
 
     @param:JsonProperty("batch_size")
     val batchSize: Int = 500,
+
+    @param:JsonProperty("filename_groups_to_columns")
+    val filenameGroupsToColumns: Map<String, String> = emptyMap(),
 ) {
     init {
         require(batchSize > 0) { "batchSize must be greater than 0, got $batchSize" }
+
+        val duplicateColumns = filenameGroupsToColumns.values.groupBy { it }.filter { it.value.size > 1 }
+
+        if (duplicateColumns.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "Duplicate column names in filename_groups_to_columns: $duplicateColumns"
+            )
+        }
     }
 }
 

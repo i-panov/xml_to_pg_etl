@@ -1,10 +1,6 @@
 package ru.my
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.*
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
@@ -160,10 +156,10 @@ private fun sanitizeFileName(fileName: String): String {
     return fileName
 }
 
-private val ARCHIVE_EXTENSIONS = setOf(".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".gz", ".bz2", ".7z")
+private val ARCHIVE_EXTENSIONS = setOf("zip", "tar", "tar.gz", "tgz", "tar.bz2", "tbz2", "gz", "bz2", "7z")
 
-fun isArchive(path: String): Boolean {
-    return ARCHIVE_EXTENSIONS.any { path.endsWith(it, ignoreCase = true) }
+fun Path.isArchive(): Boolean {
+    return isRegularFile() && ARCHIVE_EXTENSIONS.any { extension.equals(it, ignoreCase = true) } && fileSize() > 0
 }
 
 // --------------------------------------------------------------------------------------

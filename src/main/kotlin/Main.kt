@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.*
 import org.slf4j.LoggerFactory
 import ru.my.db.PostgresUpserter
 import ru.my.db.TableIdentifier
-import ru.my.xml.isXmlFile
+import ru.my.xml.isXml
 import ru.my.xml.parseXmlElements
 import java.nio.file.Path
 import java.sql.SQLException
@@ -28,7 +28,7 @@ data class MappingWithFile(val xmlFile: Path, val mapping: MappingConfig)
 class XmlState(
     val path: Path, extractDir: String?,
     private val fileMasks: Set<Regex> = emptySet(),
-    maxItemSizeBytes: Long = MAX_ARCHIVE_ITEM_SIZE,
+    val maxItemSizeBytes: Long = MAX_ARCHIVE_ITEM_SIZE,
 ) {
     init {
         require(path.exists()) { "XML file, directory, or archive not found: $path" }
@@ -44,7 +44,7 @@ class XmlState(
                 return@run PathType.XML
             }
 
-            if (isArchive(path.toString())) {
+            if (path.isArchive()) {
                 return@run PathType.ARCHIVE
             }
         }
@@ -53,7 +53,7 @@ class XmlState(
     }
 
     private val pathToExtractArchive = when (pathType) {
-        PathType.ARCHIVE -> extractDir?.let {
+        PathType.ARCHIVE, PathType.DIR -> extractDir?.let {
             Path(it).createDirectories().absolute()
         } ?: createTempDirectory("xml_to_pg_etl_").absolute()
         else -> null
@@ -62,27 +62,33 @@ class XmlState(
     val xmlFiles: Flow<Path> = when (pathType) {
         PathType.DIR -> flow {
             for (file in path.walk()) {
-                if (file.extension.equals("xml", true) && file.isRegularFile()) {
+                if (file.isXml()) {
                     emit(file)
+                } else if (file.isArchive()) {
+                    val e = pathToExtractArchive!!.resolve(file.nameWithoutExtension)
+                    emitAll(extractArchive(file, e).filter { it.isXml() })
                 }
             }
         }
         PathType.XML -> flowOf(path)
-        PathType.ARCHIVE -> extractArchive(
-            archiveFile = path,
-            extractDir = pathToExtractArchive!!,
-            maxItemSizeBytes = maxItemSizeBytes,
-            checkerFileNameForExtract = { f ->
-                val b = Path(f).fileName.toString()
-
-                if (fileMasks.isEmpty()) {
-                    isXmlFile(b)
-                } else {
-                    fileMasks.any { it.matches(b) }
-                }
-            },
-        )
+        PathType.ARCHIVE -> extractArchive(path, pathToExtractArchive!!)
     }.buffer().flowOn(Dispatchers.IO)
+
+    private fun extractArchive(path: Path, extractDir: Path) = extractArchive(
+        archiveFile = path,
+        extractDir = extractDir,
+        maxItemSizeBytes = maxItemSizeBytes,
+        checkerFileNameForExtract = { f ->
+            val a = Path(f).fileName
+            val b = a.toString()
+
+            if (fileMasks.isEmpty()) {
+                a.isXml()
+            } else {
+                fileMasks.any { it.matches(b) }
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

@@ -5,8 +5,7 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.*
-import kotlin.io.path.inputStream
-import kotlin.io.path.name
+import kotlin.io.path.*
 
 private val logger = LoggerFactory.getLogger("XmlUtils")
 
@@ -120,7 +119,6 @@ private fun parseXmlDeclarationEncoding(headerText: String): Charset? {
     }
 }
 
-fun isXmlFile(fileName: String, extensions: Set<String> = setOf("xml")): Boolean {
-    val ext = fileName.substringAfterLast('.', "").lowercase()
-    return extensions.any { it.equals(ext, ignoreCase = true) }
+fun Path.isXml(): Boolean {
+    return isRegularFile() && extension.equals("xml", ignoreCase = true) && fileSize() > 0
 }

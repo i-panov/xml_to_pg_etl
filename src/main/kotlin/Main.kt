@@ -38,22 +38,11 @@ class XmlState(
         require(path.exists()) { "XML file, directory, or archive not found: $path" }
     }
 
-    val pathType = run {
-        if (path.isDirectory()) {
-            return@run PathType.DIR
-        }
-
-        if (path.isRegularFile()) {
-            if (path.toString().endsWith(".xml", ignoreCase = true)) {
-                return@run PathType.XML
-            }
-
-            if (path.isArchive()) {
-                return@run PathType.ARCHIVE
-            }
-        }
-
-        throw IllegalArgumentException("Unsupported xml path: $path")
+    val pathType = when {
+        path.isDirectory() -> PathType.DIR
+        path.isXml() -> PathType.XML
+        path.isArchive() -> PathType.ARCHIVE
+        else -> throw IllegalArgumentException("Unsupported xml path: $path")
     }
 
     private val pathToExtractArchive = when (pathType) {

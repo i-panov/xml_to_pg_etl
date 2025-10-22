@@ -100,6 +100,8 @@ inline fun <T> Connection.withTransaction(block: () -> T): T {
     }
 }
 
+private val DATE_REGEX = Regex("^(\\d{4}-\\d{2}-\\d{2})")
+
 fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
     if (value == null) {
         if (col.isNullable) {
@@ -181,7 +183,10 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
 
             Types.DATE -> {
                 try {
-                    setDate(index, Date.valueOf(value))
+                    val dateString = DATE_REGEX.find(value)?.groups?.get(1)?.value
+                        ?: throw IllegalArgumentException("No valid date pattern found in '$value'")
+
+                    setDate(index, Date.valueOf(dateString))
                 } catch (e: IllegalArgumentException) {
                     throw IllegalArgumentException(
                         "Cannot convert '$value' to DATE for column '${col.name}'. Expected format: YYYY-MM-DD",

@@ -5,6 +5,7 @@ import com.akuleshov7.ktoml.source.decodeFromStream
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import kotlinx.serialization.Serializable
+import org.postgresql.PGProperty
 import java.io.File
 import java.nio.file.Path
 import kotlin.io.path.inputStream
@@ -78,9 +79,9 @@ data class DbConfig(
             maxLifetime = props.maxLifetime.toLong() * 1000
             validationTimeout = props.validationTimeout.toLong() * 1000
 
-            addDataSourceProperty("socketTimeout", props.socketTimeout.toString())
-            addDataSourceProperty("tcpKeepAlive", "true")
-            addDataSourceProperty("reWriteBatchedInserts", "true")
+            setDataSourceProperty(PGProperty.SOCKET_TIMEOUT, props.socketTimeout)
+            setDataSourceProperty(PGProperty.TCP_KEEP_ALIVE, true)
+            setDataSourceProperty(PGProperty.REWRITE_BATCHED_INSERTS, true)
 
             // statement_timeout должен сработать ДО socketTimeout, чтобы сервер успел прервать запрос
             val statementTimeout = (props.socketTimeout * 1000 * 0.85).roundToInt()
@@ -118,4 +119,16 @@ data class AppConfig(
     companion object {
         fun load(path: Path): AppConfig = path.inputStream().use { Toml.decodeFromStream<AppConfig>(it) }
     }
+}
+
+/**
+ * Типобезопасный хелпер для установки свойств PostgreSQL драйвера в HikariConfig.
+ * @param property Свойство из энума `PGProperty`.
+ * @param value Значение свойства.
+ */
+fun HikariConfig.setDataSourceProperty(property: PGProperty, value: Any) {
+    // Используем именно .getName(), чтобы получить правильное имя свойства ("socketTimeout"),
+    // а не .name, которое вернет имя enum-константы ("SOCKET_TIMEOUT").
+    @Suppress("UsePropertyAccessSyntax")
+    addDataSourceProperty(property.getName(), value.toString())
 }

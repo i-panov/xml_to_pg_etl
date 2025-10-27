@@ -94,10 +94,17 @@ class PostgresUpserter(
             item.entries.associate { (k, v) -> k.lowercase() to v }
         }
 
+        // Фильтруем дубликаты по уникальным колонкам
+        val uniqueItems = filterDuplicates(itemsNormalized)
+
+        if (uniqueItems.isEmpty()) {
+            return
+        }
+
         dataSource.connection.use { conn ->
             conn.withTransaction {
                 conn.prepareStatement(sql).use { stmt ->
-                    for (item in itemsNormalized) {
+                    for (item in uniqueItems) {
                         workingColumns.withIndex().forEach { (colIndex, col) ->
                             stmt.setParameter(
                                 index = colIndex + 1, // PreparedStatement параметры нумеруются с 1
@@ -113,5 +120,25 @@ class PostgresUpserter(
                 }
             }
         }
+    }
+
+    private fun filterDuplicates(items: List<Map<String, String>>): List<Map<String, String>> {
+        if (uniqueColumns.isEmpty()) return items
+
+        val seen = mutableSetOf<List<String>>()
+        val result = mutableListOf<Map<String, String>>()
+
+        for (item in items) {
+            val uniqueKey = uniqueColumns.map { col ->
+                item[col.lowercase()] ?: throw IllegalStateException("Missing unique column $col in item")
+            }
+
+            if (seen.add(uniqueKey)) {
+                result.add(item)
+            }
+        }
+
+        println("Filtered ${items.size - result.size} duplicates from ${items.size} items")
+        return result
     }
 }

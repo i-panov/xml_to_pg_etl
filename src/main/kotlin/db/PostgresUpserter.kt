@@ -138,7 +138,6 @@ class PostgresUpserter(
             }
         }
 
-        println("Filtered ${items.size - result.size} duplicates from ${items.size} items")
         return result
     }
 }

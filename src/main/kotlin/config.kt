@@ -65,7 +65,7 @@ data class DbConfig(
             jdbcUrl = this@DbConfig.jdbcUrl
             username = this@DbConfig.user
             password = this@DbConfig.password
-            schema = props.schema
+            schema = props.schema.ifBlank { null }
 
             // ОСНОВНАЯ НАСТРОЙКА: уменьшаем пул, но не так радикально
             // Формула: Ядра * 2, но с жестким ограничением сверху.

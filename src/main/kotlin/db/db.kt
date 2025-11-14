@@ -79,7 +79,7 @@ private val columnsCache = ConcurrentHashMap<TableIdentifier, List<ColumnInfo>>(
 
 fun DatabaseMetaData.getColumnsInfo(table: TableIdentifier): List<ColumnInfo> {
     return columnsCache.computeIfAbsent(table) {
-        getColumns(null, table.schema, table.name, null).use {
+        getColumns(null, table.schema.ifBlank { null }, table.name, null).use {
             it.map(::ColumnInfo).toList()
         }
     }

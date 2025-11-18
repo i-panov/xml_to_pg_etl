@@ -3,7 +3,7 @@ package ru.my
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
-import ru.my.xml.isXmlFile
+import ru.my.xml.isXml
 import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.io.path.exists
@@ -26,7 +26,7 @@ class ArchiveTest {
             extractArchive(
                 archiveFile = archiveFile,
                 extractDir = tempDir,
-                checkerFileNameForExtract = { isXmlFile(it) },
+                checkerFileNameForExtract = { Path.of(it).isXml() },
             ).toList()
         }
 

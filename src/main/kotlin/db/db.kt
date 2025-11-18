@@ -10,7 +10,7 @@ fun quoteDbIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
 
 data class TableIdentifier(
     val name: String,
-    val schema: String = "",
+    val schema: String = "public",
 ) {
     init {
         require(name.isNotBlank()) { "Table name cannot be empty" }
@@ -79,7 +79,7 @@ private val columnsCache = ConcurrentHashMap<TableIdentifier, List<ColumnInfo>>(
 
 fun DatabaseMetaData.getColumnsInfo(table: TableIdentifier): List<ColumnInfo> {
     return columnsCache.computeIfAbsent(table) {
-        getColumns(null, table.schema.ifBlank { null }, table.name, null).use {
+        getColumns(null, table.schema.ifBlank { "public" }, table.name, null).use {
             it.map(::ColumnInfo).toList()
         }
     }

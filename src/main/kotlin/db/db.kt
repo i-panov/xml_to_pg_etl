@@ -2,6 +2,7 @@ package ru.my.db
 
 import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.KeyDeserializer
+import ru.my.DbProps
 import java.math.BigDecimal
 import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
@@ -10,7 +11,7 @@ fun quoteDbIdent(name: String) = "\"${name.replace("\"", "\"\"")}\""
 
 data class TableIdentifier(
     val name: String,
-    val schema: String = "public",
+    val schema: String = DbProps.globalSchema,
 ) {
     init {
         require(name.isNotBlank()) { "Table name cannot be empty" }
@@ -79,7 +80,7 @@ private val columnsCache = ConcurrentHashMap<TableIdentifier, List<ColumnInfo>>(
 
 fun DatabaseMetaData.getColumnsInfo(table: TableIdentifier): List<ColumnInfo> {
     return columnsCache.computeIfAbsent(table) {
-        getColumns(null, table.schema.ifBlank { "public" }, table.name, null).use {
+        getColumns(null, table.schema.ifBlank { DbProps.globalSchema }, table.name, null).use {
             it.map(::ColumnInfo).toList()
         }
     }

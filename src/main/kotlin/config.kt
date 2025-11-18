@@ -20,8 +20,8 @@ data class DbProps(
     val maxLifetime: Int = 20 * 60,
     val validationTimeout: Int = 5,
     val socketTimeout: Int = 15 * 60,
-    val schema: String = "",
-    val appName: String = "",
+    val schema: String = "public",
+    val appName: String = "ETL",
 ) {
     init {
         require(connectionTimeout >= 0) { "Connection timeout must be non-negative" }
@@ -29,6 +29,12 @@ data class DbProps(
         require(maxLifetime >= 0) { "Max lifetime must be non-negative" }
         require(validationTimeout >= 0) { "Validation timeout must be non-negative" }
         require(socketTimeout >= 0) { "Socket timeout must be non-negative" }
+
+        globalSchema = schema
+    }
+
+    companion object {
+        lateinit var globalSchema: String
     }
 }
 

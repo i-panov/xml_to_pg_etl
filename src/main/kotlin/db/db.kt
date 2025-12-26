@@ -222,10 +222,16 @@ fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) 
                             java.time.LocalDateTime.parse(value)
                         }
                         else -> {
-                            // Старый формат: YYYY-MM-DD HH:mm:ss
-                            java.time.LocalDateTime.parse(value.replace(' ', 'T'))
+                            try {
+                                // Старый формат: YYYY-MM-DD HH:mm:ss
+                                java.time.LocalDateTime.parse(value.replace(' ', 'T'))
+                            } catch (_: Exception) {
+                                // Только дата: YYYY-MM-DD
+                                java.time.LocalDate.parse(value).atStartOfDay()
+                            }
                         }
                     }
+
                     setTimestamp(index, Timestamp.valueOf(timestamp))
                 } catch (e: Exception) {
                     throw IllegalArgumentException(

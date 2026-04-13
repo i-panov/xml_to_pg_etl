@@ -219,9 +219,51 @@ appName = "XML_ETL"        # имя приложения в pg_stat_activity
   "table.column": {
     "path": ["path", "to", "element"],
     "type": "CONTENT",
-    "required": true,        // Пропустить запись, если нет значения
-    "not_for_save": false,   // Использовать только для валидации
-    "structure": {...}       // Для JSON_OBJECT/JSON_ARRAY
+    "required": true,          // Пропустить запись, если нет значения
+    "not_for_save": false,     // Использовать только для валидации
+    "default_value": "false",  // Значение по умолчанию, если поле отсутствует в XML
+    "structure": {...}         // Для JSON_OBJECT/JSON_ARRAY
+  }
+}
+```
+
+**Параметр `default_value`**:
+
+Используется когда значение отсутствует в XML и столбец имеет ограничение `NOT NULL` в PostgreSQL.
+
+```json
+{
+  "is_active": {
+    "path": ["isActive"],
+    "type": "ATTRIBUTE",
+    "default_value": "false"
+  }
+}
+```
+
+**Приоритет обработки `null` значений**:
+
+1. Если значение есть в XML → используется оно
+2. Если значения нет, но задан `default_value` в маппинге → используется `default_value`
+3. Если значения нет и `default_value` не задан, но в PostgreSQL есть `DEFAULT` → используется значение из DDL таблицы
+4. Если ничего нет и столбец `NOT NULL` → ошибка `IllegalStateException`
+
+**Пример**:
+
+```sql
+-- Таблица с NOT NULL DEFAULT
+CREATE TABLE products (
+    id INT PRIMARY KEY,
+    is_active BOOLEAN NOT NULL DEFAULT false
+);
+```
+
+```json
+{
+  "is_active": {
+    "path": ["isActive"],
+    "type": "ATTRIBUTE"
+    // default_value не указан — будет использован DEFAULT false из DDL
   }
 }
 ```
@@ -401,7 +443,12 @@ xmlFiles
 | `BYTEA` | `ByteArray` | Hex string → bytes |
 | `JSON`, `JSONB` | `String` | Передаётся как текст |
 
-**Nullable колонки**: Если значение отсутствует → `NULL`. Если колонка `NOT NULL` → ошибка.
+**Обработка отсутствующих значений**:
+
+- Если значение отсутствует в XML и колонка `NULLABLE` → вставляется `NULL`
+- Если значение отсутствует и задан `default_value` в маппинге → используется `default_value`
+- Если значение отсутствует, `default_value` не задан, но в PostgreSQL есть `DEFAULT` → используется значение из DDL
+- Если значение отсутствует, нет `default_value`, и колонка `NOT NULL` → ошибка
 
 ## ⚡ Производительность
 

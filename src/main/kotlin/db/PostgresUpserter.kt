@@ -46,7 +46,7 @@ class PostgresUpserter(
 
     val workingColumns by lazy {
         allTableColumns.filter { col ->
-            targetColumns.any { it.lowercase() == col.name.lowercase() }
+            targetColumns.any { it.equals(col.name, ignoreCase = true) }
         }
     }
 
@@ -59,7 +59,7 @@ class PostgresUpserter(
             val conflictTarget = uniqueColumns.joinToString(", ") { quoteDbIdent(it) }
 
             val updateSet = workingColumns
-                .filterNot { col -> uniqueColumns.any { it.lowercase() == col.name.lowercase() } }
+                .filterNot { col -> uniqueColumns.any { it.equals(col.name, ignoreCase = true) } }
                 .joinToString(", ") { "${quoteDbIdent(it.name)} = EXCLUDED.${quoteDbIdent(it.name)}" }
 
             append("INSERT INTO ${table.fullyQualifiedName} (")

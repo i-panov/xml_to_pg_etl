@@ -52,13 +52,15 @@ data class ColumnInfo(
     val name: String,
     val typeId: Int,
     val typeName: String, // может быть полезно например для JSON, для которого typeId будет OTHER
-    val isNullable: Boolean
+    val isNullable: Boolean,
+    val defaultValue: String? = null,
 ) {
     constructor(rs: ResultSet): this(
         name = rs.getString("COLUMN_NAME"),
         typeId = rs.getInt("DATA_TYPE"),
         typeName = rs.getString("TYPE_NAME").lowercase(),
         isNullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable,
+        defaultValue = rs.getString("COLUMN_DEF"),
     )
 }
 
@@ -104,204 +106,205 @@ inline fun <T> Connection.withTransaction(block: () -> T): T {
 private val DATE_REGEX = Regex("^(\\d{4}-\\d{2}-\\d{2})")
 
 fun PreparedStatement.setParameter(index: Int, col: ColumnInfo, value: String?) {
-    if (value == null) {
-        if (col.isNullable) {
+    val resolvedValue = value
+        ?: if (col.isNullable) {
+            // NULLABLE колонка — можно передать null
             setNull(index, col.typeId)
-        } else {
-            throw IllegalStateException("NOT NULL column '${col.name}' cannot be null")
+            return
+        } else // NOT NULL, но есть DEFAULT — используем его
+            col.defaultValue
+                ?: throw IllegalStateException("NOT NULL column '${col.name}' cannot be null and no default value is defined")
+
+    fun hexToBytes(hex: String): ByteArray {
+        require(hex.length % 2 == 0) { "Hex string must have even length" }
+        return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    }
+
+    when (col.typeId) {
+        Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
+        Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR,
+        Types.CLOB, Types.NCLOB, Types.ROWID -> setString(index, resolvedValue)
+
+        Types.BIT, Types.BOOLEAN -> {
+            val isTrue = sequenceOf("1", "true", "t", "yes", "y").contains(resolvedValue.lowercase())
+            setBoolean(index, isTrue)
         }
-    } else {
-        fun hexToBytes(hex: String): ByteArray {
-            require(hex.length % 2 == 0) { "Hex string must have even length" }
-            return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        Types.TINYINT -> {
+            try {
+                setByte(index, resolvedValue.toByte())
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to TINYINT for column '${col.name}'", e)
+            }
         }
 
-        when (col.typeId) {
-            Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
-            Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR,
-            Types.CLOB, Types.NCLOB, Types.ROWID -> setString(index, value)
-
-            Types.BIT, Types.BOOLEAN -> {
-                val isTrue = sequenceOf("1", "true", "t", "yes", "y").contains(value.lowercase())
-                setBoolean(index, isTrue)
+        Types.SMALLINT -> {
+            try {
+                setShort(index, resolvedValue.toShort())
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to SMALLINT for column '${col.name}'", e)
             }
+        }
 
-            Types.TINYINT -> {
-                try {
-                    setByte(index, value.toByte())
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to TINYINT for column '${col.name}'", e)
-                }
+        Types.INTEGER -> {
+            try {
+                setInt(index, resolvedValue.toInt())
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to INTEGER for column '${col.name}'", e)
             }
+        }
 
-            Types.SMALLINT -> {
-                try {
-                    setShort(index, value.toShort())
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to SMALLINT for column '${col.name}'", e)
-                }
+        Types.BIGINT -> {
+            try {
+                setLong(index, resolvedValue.toLong())
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to BIGINT for column '${col.name}'", e)
             }
+        }
 
-            Types.INTEGER -> {
-                try {
-                    setInt(index, value.toInt())
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to INTEGER for column '${col.name}'", e)
-                }
+        Types.FLOAT, Types.REAL -> {
+            try {
+                setFloat(index, (resolvedValue.replace(',', '.')).toFloat())
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to FLOAT for column '${col.name}'", e)
             }
+        }
 
-            Types.BIGINT -> {
-                try {
-                    setLong(index, value.toLong())
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to BIGINT for column '${col.name}'", e)
-                }
+        Types.DOUBLE -> {
+            try {
+                setDouble(index, (resolvedValue.replace(',', '.')).toDouble())
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to DOUBLE for column '${col.name}'", e)
             }
+        }
 
-            Types.FLOAT, Types.REAL -> {
-                try {
-                    setFloat(index, (value.replace(',', '.')).toFloat())
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to FLOAT for column '${col.name}'", e)
-                }
+        Types.NUMERIC, Types.DECIMAL -> {
+            try {
+                setBigDecimal(index, BigDecimal(resolvedValue.replace(',', '.')))
+            } catch (e: NumberFormatException) {
+                throw IllegalArgumentException("Cannot convert '$resolvedValue' to DECIMAL for column '${col.name}'", e)
             }
+        }
 
-            Types.DOUBLE -> {
-                try {
-                    setDouble(index, (value.replace(',', '.')).toDouble())
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to DOUBLE for column '${col.name}'", e)
-                }
+        Types.DATE -> {
+            try {
+                val dateString = DATE_REGEX.find(resolvedValue)?.groups?.get(1)?.value
+                    ?: throw IllegalArgumentException("No valid date pattern found in '$resolvedValue'")
+
+                setDate(index, Date.valueOf(dateString))
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException(
+                    "Cannot convert '$resolvedValue' to DATE for column '${col.name}'. Expected format: YYYY-MM-DD",
+                    e
+                )
             }
+        }
 
-            Types.NUMERIC, Types.DECIMAL -> {
-                try {
-                    setBigDecimal(index, BigDecimal(value.replace(',', '.')))
-                } catch (e: NumberFormatException) {
-                    throw IllegalArgumentException("Cannot convert '$value' to DECIMAL for column '${col.name}'", e)
-                }
+        Types.TIME -> {
+            try {
+                setTime(index, Time.valueOf(resolvedValue))
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException(
+                    "Cannot convert '$resolvedValue' to TIME for column '${col.name}'. Expected format: HH:mm:ss",
+                    e
+                )
             }
+        }
 
-            Types.DATE -> {
-                try {
-                    val dateString = DATE_REGEX.find(value)?.groups?.get(1)?.value
-                        ?: throw IllegalArgumentException("No valid date pattern found in '$value'")
-
-                    setDate(index, Date.valueOf(dateString))
-                } catch (e: IllegalArgumentException) {
-                    throw IllegalArgumentException(
-                        "Cannot convert '$value' to DATE for column '${col.name}'. Expected format: YYYY-MM-DD",
-                        e
-                    )
-                }
-            }
-
-            Types.TIME -> {
-                try {
-                    setTime(index, Time.valueOf(value))
-                } catch (e: IllegalArgumentException) {
-                    throw IllegalArgumentException(
-                        "Cannot convert '$value' to TIME for column '${col.name}'. Expected format: HH:mm:ss",
-                        e
-                    )
-                }
-            }
-
-            Types.TIMESTAMP -> {
-                try {
-                    val timestamp = when {
-                        value.contains('+') || value.endsWith('Z') -> {
-                            // Форматы с таймзоной - конвертируем в локальное время
-                            java.time.OffsetDateTime.parse(value)
-                                .toInstant()
-                                .atZone(java.time.ZoneId.systemDefault())
-                                .toLocalDateTime()
-                        }
-                        value.contains('T') -> {
-                            // ISO format без таймзоны
-                            java.time.LocalDateTime.parse(value)
-                        }
-                        else -> {
-                            try {
-                                // Старый формат: YYYY-MM-DD HH:mm:ss
-                                java.time.LocalDateTime.parse(value.replace(' ', 'T'))
-                            } catch (_: Exception) {
-                                // Только дата: YYYY-MM-DD
-                                java.time.LocalDate.parse(value).atStartOfDay()
-                            }
-                        }
+        Types.TIMESTAMP -> {
+            try {
+                val timestamp = when {
+                    resolvedValue.contains('+') || resolvedValue.endsWith('Z') -> {
+                        // Форматы с таймзоной - конвертируем в локальное время
+                        java.time.OffsetDateTime.parse(resolvedValue)
+                            .toInstant()
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDateTime()
                     }
-
-                    setTimestamp(index, Timestamp.valueOf(timestamp))
-                } catch (e: Exception) {
-                    throw IllegalArgumentException(
-                        "Cannot convert '$value' to TIMESTAMP for column '${col.name}'. " +
-                                "Expected formats: YYYY-MM-DD HH:mm:ss, YYYY-MM-DDTHH:mm:ss, or formats with timezone",
-                        e
-                    )
-                }
-            }
-
-            Types.TIMESTAMP_WITH_TIMEZONE -> {
-                try {
-                    // Пробуем распарсить как ISO-8601 timestamp с таймзоной
-                    val instant = java.time.Instant.parse(value)
-                    setTimestamp(index, Timestamp.from(instant))
-                } catch (e: java.time.format.DateTimeParseException) {
-                    // Если не ISO-8601, пробуем как локальное время с таймзоной
-                    try {
-                        val timestampWithTz = java.time.OffsetDateTime.parse(value).toInstant()
-                        setTimestamp(index, Timestamp.from(timestampWithTz))
-                    } catch (_: java.time.format.DateTimeParseException) {
-                        // Пробуем как LocalDateTime и конвертируем в системную таймзону
+                    resolvedValue.contains('T') -> {
+                        // ISO format без таймзоны
+                        java.time.LocalDateTime.parse(resolvedValue)
+                    }
+                    else -> {
                         try {
-                            val localDateTime = java.time.LocalDateTime.parse(value)
-                            val zonedDateTime = localDateTime.atZone(java.time.ZoneId.systemDefault())
-                            setTimestamp(index, Timestamp.from(zonedDateTime.toInstant()))
-                        } catch (_: java.time.format.DateTimeParseException) {
-                            throw IllegalArgumentException(
-                                "Cannot convert '$value' to TIMESTAMP WITH TIME ZONE for column '${col.name}'. " +
-                                        "Expected formats: ISO-8601 (e.g., 2023-10-17T12:34:56Z, 2023-10-17T15:34:56+03:00) " +
-                                        "or LocalDateTime (e.g., 2023-10-17T12:34:56)",
-                                e
-                            )
+                            // Старый формат: YYYY-MM-DD HH:mm:ss
+                            java.time.LocalDateTime.parse(resolvedValue.replace(' ', 'T'))
+                        } catch (_: Exception) {
+                            // Только дата: YYYY-MM-DD
+                            java.time.LocalDate.parse(resolvedValue).atStartOfDay()
                         }
                     }
                 }
+
+                setTimestamp(index, Timestamp.valueOf(timestamp))
+            } catch (e: Exception) {
+                throw IllegalArgumentException(
+                    "Cannot convert '$resolvedValue' to TIMESTAMP for column '${col.name}'. " +
+                            "Expected formats: YYYY-MM-DD HH:mm:ss, YYYY-MM-DDTHH:mm:ss, or formats with timezone",
+                    e
+                )
             }
-
-            Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> {
-                try {
-                    setBytes(index, hexToBytes(value))
-                } catch (e: Exception) {
-                    throw IllegalArgumentException(
-                        "Cannot convert '$value' to BINARY for column '${col.name}'. Expected hex string",
-                        e
-                    )
-                }
-            }
-
-            Types.OTHER -> {
-                // Используем typeName для определения JSON/JSONB
-                when (col.typeName) {
-                    "json", "jsonb" -> {
-                        val pgObject = org.postgresql.util.PGobject()
-                        pgObject.type = col.typeName
-                        pgObject.value = value
-                        setObject(index, pgObject)
-                    }
-                    else -> throw UnsupportedOperationException(
-                        "Type ${col.typeName} (${col.typeId}) not supported for column '${col.name}'"
-                    )
-                }
-            }
-
-            Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
-            Types.ARRAY, Types.REF, Types.DATALINK, Types.SQLXML,
-            Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE ->
-                throw UnsupportedOperationException("Type ${col.typeId} not supported for column '${col.name}'")
-
-            else -> throw IllegalArgumentException("Unknown type: ${col.typeId} for column '${col.name}'")
         }
+
+        Types.TIMESTAMP_WITH_TIMEZONE -> {
+            try {
+                // Пробуем распарсить как ISO-8601 timestamp с таймзоной
+                val instant = java.time.Instant.parse(resolvedValue)
+                setTimestamp(index, Timestamp.from(instant))
+            } catch (e: java.time.format.DateTimeParseException) {
+                // Если не ISO-8601, пробуем как локальное время с таймзоной
+                try {
+                    val timestampWithTz = java.time.OffsetDateTime.parse(resolvedValue).toInstant()
+                    setTimestamp(index, Timestamp.from(timestampWithTz))
+                } catch (_: java.time.format.DateTimeParseException) {
+                    // Пробуем как LocalDateTime и конвертируем в системную таймзону
+                    try {
+                        val localDateTime = java.time.LocalDateTime.parse(resolvedValue)
+                        val zonedDateTime = localDateTime.atZone(java.time.ZoneId.systemDefault())
+                        setTimestamp(index, Timestamp.from(zonedDateTime.toInstant()))
+                    } catch (_: java.time.format.DateTimeParseException) {
+                        throw IllegalArgumentException(
+                            "Cannot convert '$resolvedValue' to TIMESTAMP WITH TIME ZONE for column '${col.name}'. " +
+                                    "Expected formats: ISO-8601 (e.g., 2023-10-17T12:34:56Z, 2023-10-17T15:34:56+03:00) " +
+                                    "or LocalDateTime (e.g., 2023-10-17T12:34:56)",
+                            e
+                        )
+                    }
+                }
+            }
+        }
+
+        Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> {
+            try {
+                setBytes(index, hexToBytes(resolvedValue))
+            } catch (e: Exception) {
+                throw IllegalArgumentException(
+                    "Cannot convert '$resolvedValue' to BINARY for column '${col.name}'. Expected hex string",
+                    e
+                )
+            }
+        }
+
+        Types.OTHER -> {
+            // Используем typeName для определения JSON/JSONB
+            when (col.typeName) {
+                "json", "jsonb" -> {
+                    val pgObject = org.postgresql.util.PGobject()
+                    pgObject.type = col.typeName
+                    pgObject.value = resolvedValue
+                    setObject(index, pgObject)
+                }
+                else -> throw UnsupportedOperationException(
+                    "Type ${col.typeName} (${col.typeId}) not supported for column '${col.name}'"
+                )
+            }
+        }
+
+        Types.JAVA_OBJECT, Types.DISTINCT, Types.STRUCT,
+        Types.ARRAY, Types.REF, Types.DATALINK, Types.SQLXML,
+        Types.REF_CURSOR, Types.TIME_WITH_TIMEZONE ->
+            throw UnsupportedOperationException("Type ${col.typeId} not supported for column '${col.name}'")
+
+        else -> throw IllegalArgumentException("Unknown type: ${col.typeId} for column '${col.name}'")
     }
 }

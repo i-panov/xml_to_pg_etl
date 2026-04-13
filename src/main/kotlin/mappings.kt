@@ -133,6 +133,9 @@ data class ValueMapping(
     @param:JsonProperty("not_for_save")
     val notForSave: Boolean = false,
 
+    @param:JsonProperty("default_value")
+    val defaultValue: String? = null,
+
     // Для JSON_OBJECT и JSON_ARRAY: структура полей
     @param:JsonProperty("structure")
     val structure: Map<String, ValueMapping>? = null,
@@ -159,6 +162,7 @@ data class ValueMapping(
             valueType = valueType,
             required = required,
             notForSave = notForSave,
+            defaultValue = defaultValue,
             outputKey = outputKey,
             structure = structureConfigs,
         )

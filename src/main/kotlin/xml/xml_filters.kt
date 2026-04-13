@@ -28,6 +28,7 @@ data class XmlValueConfig(
     val valueType: XmlValueType,
     val required: Boolean = false,
     val notForSave: Boolean = false,
+    val defaultValue: String? = null,
     val outputKey: String,
     val structure: Map<String, XmlValueConfig>? = null,
 ) {

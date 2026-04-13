@@ -256,8 +256,20 @@ class EtlCommand : CliktCommand() {
                                 val columnId = mapping.resolvedColumnMapping[originalKey] ?: continue
 
                                 if (columnId.table == processor.upserter.table) {
-                                    // Используем только имя колонки без префикса
+                                    // Используем только имя колонки без префикса таблицы
                                     put(columnId.name, value)
+                                }
+                            }
+
+                            // Добавляем default_value для колонок, у которых нет значения из XML
+                            for ((originalKey, valueMapping) in mapping.xml.values) {
+                                val columnId = mapping.resolvedColumnMapping[originalKey] ?: continue
+                                if (columnId.table != processor.upserter.table) continue
+                                if (valueMapping.notForSave) continue
+
+                                // Если значения нет в row и есть defaultValue — подставляем
+                                if (originalKey !in row && valueMapping.defaultValue != null) {
+                                    put(columnId.name, valueMapping.defaultValue)
                                 }
                             }
                         }
